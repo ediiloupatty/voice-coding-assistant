@@ -30,3 +30,17 @@ def test_terlalu_hening(monkeypatch):
     assert listen._terlalu_hening(np.zeros(16000, dtype="float32"))
     assert listen._terlalu_hening(None)
     assert not listen._terlalu_hening(np.full(16000, 0.2, dtype="float32"))
+
+
+def test_listen_auto_atau_ketik_mode_ketik(monkeypatch):
+    # User menekan ENTER lalu mengetik -> jenis 'ketik'
+    monkeypatch.setattr(listen, "_rekam_atau_ketik", lambda: ("ketik", "buatkan fungsi"))
+    jenis, teks = listen.listen_auto_atau_ketik()
+    assert jenis == "ketik" and teks == "buatkan fungsi"
+
+
+def test_listen_auto_atau_ketik_kosong(monkeypatch):
+    # Tidak ada suara maupun ketikan -> suara kosong (loop dengar lagi)
+    monkeypatch.setattr(listen, "_rekam_atau_ketik", lambda: ("kosong", None))
+    jenis, teks = listen.listen_auto_atau_ketik()
+    assert jenis == "suara" and teks == ""

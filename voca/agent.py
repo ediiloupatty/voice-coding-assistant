@@ -466,27 +466,28 @@ def run_text_mode(client, messages):
 
 
 def run_handsfree_mode(client, messages):
-    """Mode hands-free: dengar terus otomatis, konfirmasi pakai suara."""
-    from .listen import listen_auto
+    """Mode hands-free: dengar otomatis, ATAU ketik kapan saja (tekan ENTER)."""
+    from .listen import listen_auto_atau_ketik
 
     set_confirm_handler(_voice_confirm)  # konfirmasi aksi lewat suara
 
     _banner(handsfree=True)
-    _hint("bicara langsung  ·  ucapkan 'berhenti' untuk keluar  ·  Ctrl+C juga bisa")
-    speak("Halo, saya siap membantu. Silakan bicara.")
+    _hint("ngomong langsung, atau tekan ENTER untuk ketik  ·  'berhenti' = keluar  ·  Ctrl+C")
+    speak("Halo, saya siap membantu. Silakan bicara, atau ketik kalau mau.")
 
     while True:
-        print(f"\n{_DIM}mendengarkan…  (diam sejenak untuk berhenti){_RESET}")
+        print(f"\n{_DIM}mendengarkan…  (ngomong, atau tekan ENTER untuk ketik){_RESET}")
         try:
-            perintah = listen_auto()
+            jenis, perintah = listen_auto_atau_ketik()
         except KeyboardInterrupt:
             speak("Sampai jumpa!")
             print(f"\n{_DIM}Sampai jumpa.{_RESET}")
             break
 
         if not perintah:
-            continue  # tidak terdengar suara -> dengar lagi
-        print(f"{_DIM}(suara){_RESET} {perintah}")
+            continue  # tidak terdengar suara / ketikan kosong -> dengar lagi
+        label = "(ketik)" if jenis == "ketik" else "(suara)"
+        print(f"{_DIM}{label}{_RESET} {perintah}")
 
         if _minta_keluar(perintah):
             speak("Baik, sampai jumpa!")

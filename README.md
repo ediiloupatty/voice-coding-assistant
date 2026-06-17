@@ -147,7 +147,8 @@ python -m voca --voice
 
 **Mode hands-free** (`voca --voice`): bicara langsung (rekam berhenti otomatis
 saat kamu diam), konfirmasi aksi dijawab "ya"/"tidak" pakai suara, ucapkan
-"berhenti"/"stop" atau tekan `Ctrl+C` untuk keluar.
+"berhenti"/"stop" atau tekan `Ctrl+C` untuk keluar. **Tetap bisa mengetik kapan
+saja** — cukup tekan `ENTER` lalu ketik perintahmu, tanpa keluar dari mode suara.
 
 ---
 

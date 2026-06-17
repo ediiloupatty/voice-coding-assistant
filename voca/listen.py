@@ -9,7 +9,10 @@ yang berjalan lokal/offline. Dua mode rekam:
 Dependensi: faster-whisper, sounddevice (butuh PortAudio di sistem).
 """
 
+import os
 import re
+import select
+import sys
 
 import numpy as np
 import sounddevice as sd
@@ -102,6 +105,57 @@ def _is_halusinasi(teks: str) -> bool:
     """True kalau teks cuma frasa halusinasi khas Whisper (bukan ucapan asli)."""
     bersih = re.sub(r"[^\w\s]", "", teks.lower()).strip()
     return bersih in _HALUSINASI
+
+
+def _rekam_atau_ketik(max_seconds: float = 15.0,
+                      silence_threshold: float = 0.01,
+                      silence_duration: float = 1.2):
+    """Rekam mic sampai hening, TAPI kalau user menekan ENTER -> beralih ketik.
+
+    Return salah satu:
+      ('ketik', baris)   user menekan Enter (baris bisa kosong)
+      ('suara', audio)   ada ucapan terekam
+      ('kosong', None)   tidak ada ucapan maupun ketikan
+    """
+    chunk_dur = 0.1
+    chunk_frames = int(SAMPLE_RATE * chunk_dur)
+    frames = []
+    started = False
+    silent_count = 0
+    bisa_keyboard = os.name == "posix"  # select(stdin) andal di POSIX saja
+
+    with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32") as stream:
+        for _ in range(int(max_seconds / chunk_dur)):
+            if bisa_keyboard and select.select([sys.stdin], [], [], 0)[0]:
+                return ("ketik", sys.stdin.readline().strip())
+            data, _overflow = stream.read(chunk_frames)
+            frames.append(data.copy())
+            if float(np.abs(data).mean()) > silence_threshold:
+                started = True
+                silent_count = 0
+            elif started:
+                silent_count += 1
+                if silent_count * chunk_dur >= silence_duration:
+                    break
+
+    if not started:
+        return ("kosong", None)
+    return ("suara", np.concatenate(frames, axis=0).flatten())
+
+
+def listen_auto_atau_ketik():
+    """Hands-free + ketik: ngomong, ATAU tekan ENTER untuk mengetik perintah.
+
+    Return (jenis, teks) dengan jenis 'suara' atau 'ketik'.
+    """
+    jenis, data = _rekam_atau_ketik()
+    if jenis == "ketik":
+        teks = data if data else input("ketik: ").strip()
+        return "ketik", teks
+    if jenis == "kosong":
+        return "suara", ""
+    print("   [mentranskripsi...]")
+    return "suara", transcribe(data)
 
 
 def transcribe(audio) -> str:
