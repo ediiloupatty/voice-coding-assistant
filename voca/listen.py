@@ -146,12 +146,13 @@ def _rekam_atau_ketik(max_seconds: float = 15.0,
 def listen_auto_atau_ketik():
     """Hands-free + ketik: ngomong, ATAU tekan ENTER untuk mengetik perintah.
 
-    Return (jenis, teks) dengan jenis 'suara' atau 'ketik'.
+    Return (jenis, teks) dengan jenis 'suara' atau 'ketik'. Untuk 'ketik',
+    teks bisa kosong (artinya user cuma menekan ENTER) — pemanggil yang
+    menampilkan prompt ketiknya (mis. kotak input ala Claude).
     """
     jenis, data = _rekam_atau_ketik()
     if jenis == "ketik":
-        teks = data if data else input("ketik: ").strip()
-        return "ketik", teks
+        return "ketik", (data or "")
     if jenis == "kosong":
         return "suara", ""
     print("   [mentranskripsi...]")

@@ -504,6 +504,13 @@ def run_handsfree_mode(client, messages):
             print(f"\n{_DIM}Sampai jumpa.{_RESET}")
             break
 
+        # User tekan ENTER tanpa langsung mengetik -> tampilkan kotak input.
+        if jenis == "ketik" and not perintah:
+            try:
+                perintah = _kotak_input("'berhenti' untuk keluar  ·  Enter kosong = batal")
+            except (EOFError, KeyboardInterrupt):
+                continue
+
         if not perintah:
             continue  # tidak terdengar suara / ketikan kosong -> dengar lagi
         label = "(ketik)" if jenis == "ketik" else "(suara)"
