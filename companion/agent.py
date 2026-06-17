@@ -1,35 +1,27 @@
 """
-agent.py — "Otak" si AI coding companion (Fase 1: berbasis teks).
+agent.py — "Otak" si AI coding companion.
 
-Memakai model Qwen via Alibaba Model Studio (endpoint OpenAI-compatible).
+Memakai model Qwen via DashScope (endpoint OpenAI-compatible).
 
 Alur kerja:
-  1. User mengetik perintah.
+  1. User memberi perintah (ketik atau suara).
   2. Qwen memikirkan langkah & memanggil tools (list_files, read_file,
      write_file, run_command) untuk menganalisis folder dan mengerjakan tugas.
-  3. Setiap aksi yang mengubah sistem minta konfirmasi user.
-  4. Model menarasikan apa yang sedang & sudah dilakukan secara real-time.
+  3. Setiap aksi yang mengubah sistem minta konfirmasi (keyboard / suara).
+  4. Model menarasikan progres secara real-time (teks + suara Piper).
 
-Nanti di fase berikutnya, narasi ini tinggal kita sambungkan ke TTS (gTTS),
-dan input teks diganti dengan STT (whisper).
+Dua mode: teks (default) dan hands-free (`--voice`).
 """
 
 import json
-import os
+import re
 import sys
 
-from dotenv import load_dotenv
 from openai import OpenAI
 
-from tools import TOOLS_SCHEMA, TOOL_FUNCTIONS, WORKSPACE
-from voice import StreamSpeaker
-
-# Baca .env dari folder proyek ini, bukan folder tempat 'kong' dipanggil,
-# supaya API key tetap ketemu walau dijalankan dari direktori mana pun.
-load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
-
-MODEL = "qwen-plus"
-DEFAULT_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+from . import config
+from .tools import TOOLS_SCHEMA, TOOL_FUNCTIONS, WORKSPACE, set_confirm_handler
+from .voice import StreamSpeaker, warmup, speak
 
 SYSTEM_PROMPT = """Kamu adalah AI coding companion berbasis suara yang bekerja \
 bersama developer, seperti rekan pair-programming yang aktif berkomunikasi.
@@ -50,7 +42,7 @@ def hubungkan_tool(client, messages):
     """Loop satu giliran: panggil model, eksekusi tool, ulangi sampai selesai."""
     while True:
         stream = client.chat.completions.create(
-            model=MODEL,
+            model=config.QWEN_MODEL,
             messages=messages,
             tools=TOOLS_SCHEMA,
             stream=True,
@@ -59,8 +51,8 @@ def hubungkan_tool(client, messages):
         text_parts = []
         # Akumulasi tool call yang datang bertahap lewat stream (per index).
         tool_calls = {}
-        # Speaker latar: mulai membacakan begitu frasa pertama siap, sambil
-        # teks berikutnya masih mengalir (suara terasa langsung muncul).
+        # Speaker latar: mulai membacakan per kalimat begitu kalimat siap,
+        # sambil teks berikutnya masih mengalir (lewat satu aliran, tanpa jeda).
         speaker = StreamSpeaker()
 
         print("\n🤖 ", end="", flush=True)
@@ -130,20 +122,44 @@ def hubungkan_tool(client, messages):
         # Lanjutkan loop: model lihat hasil tool lalu lanjut bekerja.
 
 
-def main():
-    api_key = os.getenv("DASHSCOPE_API_KEY")
-    if not api_key:
-        print("❌ DASHSCOPE_API_KEY belum diset. Salin .env.example ke .env dan isi key-mu.")
-        sys.exit(1)
+# ---------------------------------------------------------------------------
+# Pengenalan ucapan ya/tidak & kata berhenti (untuk mode suara)
+# ---------------------------------------------------------------------------
+_KATA_YA = {"ya", "iya", "yes", "boleh", "lanjut", "setuju", "oke", "ok",
+            "gas", "silakan", "jalan", "lakukan"}
+_KATA_STOP = {"berhenti", "keluar", "stop", "udahan", "udah"}
 
-    client = OpenAI(
-        api_key=api_key,
-        base_url=os.getenv("QWEN_BASE_URL", DEFAULT_BASE_URL),
-    )
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
+def _minta_keluar(perintah: str) -> bool:
+    """True kalau user jelas-jelas minta berhenti (ucapan pendek + kata stop).
+
+    Dibatasi ucapan pendek (<=3 kata) supaya tak salah keluar saat kata 'stop'
+    muncul di tengah perintah biasa, mis. 'stop server-nya lalu restart'.
+    """
+    kata = re.findall(r"\w+", perintah.lower())
+    return len(kata) <= 3 and bool(set(kata) & _KATA_STOP)
+
+
+def _voice_confirm(prompt: str) -> bool:
+    """Konfirmasi via suara: AI bertanya, user menjawab 'ya'/'tidak'."""
+    from .listen import listen_auto
+
+    print(f"\n⚠️  {prompt}")
+    speak(prompt + " Jawab ya atau tidak.")
+    jawab = listen_auto().lower()
+    print(f"📝 (suara) Jawaban: {jawab!r}")
+    setuju = bool(set(re.findall(r"\w+", jawab)) & _KATA_YA)
+    speak("Oke, saya lanjutkan." if setuju else "Baik, saya batalkan.")
+    return setuju
+
+
+# ---------------------------------------------------------------------------
+# Mode interaksi
+# ---------------------------------------------------------------------------
+def run_text_mode(client, messages):
+    """Mode teks: ketik perintah, atau 'v' + ENTER untuk bicara sekali."""
     print("=" * 60)
-    print(f"🎙️  AI Coding Companion — model: {MODEL}")
+    print(f"🎙️  AI Coding Companion — model: {config.QWEN_MODEL}")
     print(f"📂 Folder kerja: {WORKSPACE}")
     print("Ketik perintah, atau 'v' + ENTER untuk bicara. 'keluar' untuk berhenti.")
     print("=" * 60)
@@ -155,10 +171,9 @@ def main():
             print("\nSampai jumpa! 👋")
             break
 
-        # Mode suara: rekam dari mic lalu transkripsi jadi perintah.
         if perintah.lower() in ("v", "suara", "voice"):
             try:
-                from listen import listen
+                from .listen import listen
                 perintah = listen()
             except Exception as e:
                 print(f"   [⚠️  input suara gagal: {e}]")
@@ -176,6 +191,61 @@ def main():
             hubungkan_tool(client, messages)
         except Exception as e:
             print(f"\n❌ Terjadi error: {e}")
+
+
+def run_handsfree_mode(client, messages):
+    """Mode hands-free: dengar terus otomatis, konfirmasi pakai suara."""
+    from .listen import listen_auto
+
+    set_confirm_handler(_voice_confirm)  # konfirmasi aksi lewat suara
+
+    print("=" * 60)
+    print(f"🎙️  AI Coding Companion — HANDS-FREE — model: {config.QWEN_MODEL}")
+    print(f"📂 Folder kerja: {WORKSPACE}")
+    print("Bicara langsung. Ucapkan 'berhenti' untuk keluar. (Ctrl+C juga bisa)")
+    print("=" * 60)
+    speak("Halo, saya siap membantu. Silakan bicara.")
+
+    while True:
+        print("\n🎤 Mendengarkan... (bicara, berhenti otomatis saat kamu diam)")
+        try:
+            perintah = listen_auto()
+        except KeyboardInterrupt:
+            speak("Sampai jumpa!")
+            print("\nSampai jumpa! 👋")
+            break
+
+        if not perintah:
+            continue  # tidak terdengar suara -> dengar lagi
+        print(f"🧑 (suara) Kamu: {perintah}")
+
+        if _minta_keluar(perintah):
+            speak("Baik, sampai jumpa!")
+            print("Sampai jumpa! 👋")
+            break
+
+        messages.append({"role": "user", "content": perintah})
+        try:
+            hubungkan_tool(client, messages)
+        except Exception as e:
+            print(f"\n❌ Terjadi error: {e}")
+
+
+def main():
+    if not config.QWEN_API_KEY:
+        print("❌ DASHSCOPE_API_KEY belum diset. Salin .env.example ke .env dan isi key-mu.")
+        sys.exit(1)
+
+    client = OpenAI(api_key=config.QWEN_API_KEY, base_url=config.QWEN_BASE_URL)
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    warmup()  # muat model suara di awal agar balasan pertama tidak tertunda
+
+    # Mode hands-free kalau dijalankan dengan flag --voice / --suara.
+    handsfree = any(a in ("--voice", "-v", "--handsfree", "--suara") for a in sys.argv[1:])
+    if handsfree:
+        run_handsfree_mode(client, messages)
+    else:
+        run_text_mode(client, messages)
 
 
 if __name__ == "__main__":

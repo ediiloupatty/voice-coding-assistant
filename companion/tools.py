@@ -1,7 +1,7 @@
 """
 tools.py — "Tangan" si agent.
 
-Berisi fungsi-fungsi yang bisa dipanggil Claude untuk berinteraksi dengan
+Berisi fungsi-fungsi yang bisa dipanggil model untuk berinteraksi dengan
 lingkungan kerja: melihat struktur folder, membaca file, menulis file, dan
 menjalankan perintah terminal.
 
@@ -13,9 +13,24 @@ import os
 import subprocess
 from pathlib import Path
 
-# Folder kerja agent. Secara default folder tempat program dijalankan.
+
+def _detect_workspace() -> Path:
+    """Folder kerja agent = folder tempat program dijalankan.
+
+    Kalau folder itu sudah tidak valid (mis. terhapus/di-rename saat terminal
+    masih berada di dalamnya), jangan crash — pakai HOME sebagai cadangan.
+    """
+    try:
+        return Path(os.getcwd()).resolve()
+    except (FileNotFoundError, OSError):
+        home = Path.home()
+        print(f"⚠️  Folder saat ini tidak valid (mungkin terhapus). "
+              f"Pakai {home} sebagai folder kerja. Sebaiknya 'cd' ke folder yang ada.")
+        return home
+
+
 # Semua operasi file dibatasi di dalam folder ini demi keamanan.
-WORKSPACE = Path(os.getcwd()).resolve()
+WORKSPACE = _detect_workspace()
 
 
 # ---------------------------------------------------------------------------
@@ -29,10 +44,26 @@ def _resolve_safe(path: str) -> Path:
     return target
 
 
-def _confirm(prompt: str) -> bool:
-    """Tampilkan konfirmasi y/n ke user. Return True jika disetujui."""
+def _keyboard_confirm(prompt: str) -> bool:
+    """Konfirmasi default: ketik y/n di keyboard."""
     jawab = input(f"\n⚠️  {prompt} [y/N]: ").strip().lower()
     return jawab in ("y", "yes", "ya")
+
+
+# Handler konfirmasi aktif. Bisa diganti (mis. mode suara) lewat
+# set_confirm_handler(). Default: keyboard.
+_confirm_handler = _keyboard_confirm
+
+
+def set_confirm_handler(fn) -> None:
+    """Ganti cara konfirmasi (mis. konfirmasi via suara untuk mode hands-free)."""
+    global _confirm_handler
+    _confirm_handler = fn
+
+
+def _confirm(prompt: str) -> bool:
+    """Minta persetujuan user lewat handler yang aktif. Return True jika setuju."""
+    return _confirm_handler(prompt)
 
 
 # ---------------------------------------------------------------------------
