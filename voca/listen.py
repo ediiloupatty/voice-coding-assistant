@@ -36,10 +36,10 @@ def record_until_enter() -> np.ndarray | None:
     def callback(indata, frames_count, time_info, status):
         frames.append(indata.copy())
 
-    input("\n🎤 Tekan ENTER untuk MULAI bicara...")
+    input("\nTekan ENTER untuk MULAI bicara...")
     with sd.InputStream(samplerate=SAMPLE_RATE, channels=1,
                         dtype="float32", callback=callback):
-        input("🔴 Merekam... tekan ENTER lagi untuk BERHENTI.")
+        input("Merekam... tekan ENTER lagi untuk BERHENTI.")
 
     if not frames:
         return None
@@ -88,7 +88,7 @@ def listen() -> str:
     audio = record_until_enter()
     if audio is None or len(audio) == 0:
         return ""
-    print("   [📝 mentranskripsi...]")
+    print("   [mentranskripsi...]")
     return transcribe(audio)
 
 
@@ -97,10 +97,10 @@ def listen_auto() -> str:
     audio = record_until_silence()
     if audio is None or len(audio) == 0:
         return ""
-    print("   [📝 mentranskripsi...]")
+    print("   [mentranskripsi...]")
     return transcribe(audio)
 
 
 if __name__ == "__main__":
     # Tes cepat: python -m voca.listen  -> bicara, lihat teksnya
-    print(f"\n📝 Kamu bilang: {listen()!r}")
+    print(f"\nKamu bilang: {listen()!r}")

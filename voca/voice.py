@@ -216,10 +216,10 @@ def speak(teks: str) -> None:
         _gtts_play(bersih)
     except KeyboardInterrupt:
         # Tekan Ctrl+C saat bicara = lewati suara, JANGAN matikan agent.
-        print("\n   [⏭️  narasi suara dilewati]")
+        print("\n   [narasi suara dilewati]")
     except Exception as e:
         # Suara cuma "kulit" — kalau gagal, agent tetap lanjut bekerja.
-        print(f"   [⚠️  TTS gagal, lanjut tanpa suara: {e}]")
+        print(f"   [TTS gagal, lanjut tanpa suara: {e}]")
 
 
 # ---------------------------------------------------------------------------

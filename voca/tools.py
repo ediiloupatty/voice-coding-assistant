@@ -38,7 +38,7 @@ def _detect_workspace() -> Path:
         return Path(os.getcwd()).resolve()
     except (FileNotFoundError, OSError):
         home = Path.home()
-        print(f"⚠️  Folder saat ini tidak valid (mungkin terhapus). "
+        print(f"Folder saat ini tidak valid (mungkin terhapus). "
               f"Pakai {home} sebagai folder kerja. Sebaiknya 'cd' ke folder yang ada.")
         return home
 
@@ -60,7 +60,7 @@ def _resolve_safe(path: str) -> Path:
 
 def _keyboard_confirm(prompt: str) -> bool:
     """Konfirmasi default: ketik y/n di keyboard."""
-    jawab = input(f"\n⚠️  {prompt} [y/N]: ").strip().lower()
+    jawab = input(f"\n{prompt} [y/N]: ").strip().lower()
     return jawab in ("y", "yes", "ya")
 
 
