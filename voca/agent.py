@@ -20,7 +20,7 @@ import sys
 from openai import OpenAI
 
 from . import config
-from .tools import TOOLS_SCHEMA, TOOL_FUNCTIONS, WORKSPACE, set_confirm_handler
+from .tools import TOOLS_SCHEMA, TOOL_FUNCTIONS, WORKSPACE, list_files, set_confirm_handler
 from .voice import StreamSpeaker, warmup, speak
 
 SYSTEM_PROMPT = """Kamu adalah Voca, asisten coding berbasis suara.
@@ -38,17 +38,43 @@ Contoh gaya yang benar:
 - "Nah, ini masalahnya — di baris 12 ada typo." (bukan: "Setelah melakukan analisis, ditemukan bahwa...")
 - "Udah beres. Mau dijalankan sekarang?" (bukan: "Proses telah selesai dilaksanakan.")
 
-Sebelum bertindak, cek lingkungan kerja dulu pakai list_files & read_file.
-Kerjakan selangkah demi selangkah, dan ingat — kalimatmu akan diucapkan lewat suara."""
+Tools yang ada:
+- list_files: lihat struktur folder.
+- search_files: cari teks/kode cepat (seperti grep) — pakai ini buat menemukan
+  sesuatu SEBELUM membaca file besar, lebih hemat.
+- read_file: baca file (pakai start_line & end_line untuk baca sebagian saja).
+- write_file & run_command: mengubah sistem, otomatis minta konfirmasi user.
+
+Sebelum bertindak, pahami dulu lingkungan kerja. Kerjakan selangkah demi
+selangkah, langsung lakukan via tool (jangan cuma janji), dan ingat — kalimatmu
+akan diucapkan lewat suara, jadi ringkas."""
+
+
+def _pangkas_history(messages):
+    """Batasi panjang history biar hemat token & tak overflow context.
+
+    Simpan pesan system (paling depan) + ekor pesan terbaru. Pemotongan selalu
+    dimulai di pesan 'user' supaya pasangan tool_call/tool tak terputus — kalau
+    terputus, API DashScope akan menolak request.
+    """
+    if len(messages) - 1 <= config.MAX_HISTORY:  # -1 untuk pesan system
+        return
+    system = messages[0]
+    ekor = messages[-config.MAX_HISTORY:]
+    while ekor and ekor[0].get("role") != "user":
+        ekor.pop(0)
+    messages[:] = [system] + ekor
 
 
 def hubungkan_tool(client, messages):
     """Loop satu giliran: panggil model, eksekusi tool, ulangi sampai selesai."""
-    while True:
+    _pangkas_history(messages)
+    for _ in range(config.MAX_TOOL_ITERS):
         stream = client.chat.completions.create(
             model=config.QWEN_MODEL,
             messages=messages,
             tools=TOOLS_SCHEMA,
+            temperature=config.QWEN_TEMPERATURE,
             stream=True,
         )
 
@@ -124,6 +150,13 @@ def hubungkan_tool(client, messages):
                 "content": str(hasil),
             })
         # Lanjutkan loop: model lihat hasil tool lalu lanjut bekerja.
+
+    # Batas iterasi tercapai tanpa selesai -> stop biar tak muter & boros token.
+    print(f"\n   ⚠️  Batas {config.MAX_TOOL_ITERS} langkah tercapai, berhenti dulu.")
+    pesan_stop = ("Ini butuh banyak langkah, aku berhenti dulu biar nggak muter. "
+                  "Kasih tahu mau lanjut ke bagian mana.")
+    messages.append({"role": "assistant", "content": pesan_stop})
+    speak(pesan_stop)
 
 
 # ---------------------------------------------------------------------------
@@ -241,7 +274,11 @@ def main():
         sys.exit(1)
 
     client = OpenAI(api_key=config.QWEN_API_KEY, base_url=config.QWEN_BASE_URL)
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system",
+         "content": f"Struktur folder kerja saat ini ({WORKSPACE}):\n{list_files('.')}"},
+    ]
     warmup()  # muat model suara di awal agar balasan pertama tidak tertunda
 
     # Mode hands-free kalau dijalankan dengan flag --voice / --suara.
