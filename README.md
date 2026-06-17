@@ -172,6 +172,8 @@ Semua diatur lewat environment variable atau file `.env`.
 | `QWEN_BASE_URL` | endpoint intl | Base URL endpoint OpenAI-compatible DashScope. |
 | `QWEN_MODEL` | `qwen-plus` | Model LLM. |
 | `QWEN_TEMPERATURE` | `0.3` | Rendah = lebih fokus/akurat; tinggi = lebih kreatif. |
+| `LLM_MAX_RETRIES` | `4` | Jumlah percobaan saat koneksi LLM error/timeout. |
+| `LLM_RETRY_BASE_DELAY` | `2.0` | Jeda awal retry (detik), naik eksponensial (maks 30s). |
 
 ### Suara
 

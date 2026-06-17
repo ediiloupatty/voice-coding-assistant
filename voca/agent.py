@@ -16,9 +16,15 @@ Dua mode: teks (default) dan hands-free (`--voice`).
 import json
 import re
 import sys
+import time
 from pathlib import Path
 
-from openai import OpenAI
+from openai import (OpenAI, APIConnectionError, APITimeoutError,
+                    InternalServerError, RateLimitError)
+
+# Error sementara yang layak dicoba ulang (koneksi putus, timeout, 429, 5xx).
+_TRANSIENT_ERRORS = (APIConnectionError, APITimeoutError,
+                     RateLimitError, InternalServerError)
 
 from . import config
 from .tools import TOOLS_SCHEMA, TOOL_FUNCTIONS, WORKSPACE, list_files, set_confirm_handler
@@ -272,51 +278,74 @@ def _tanya_resume(messages) -> bool:
     return jawab in ("y", "yes", "ya")
 
 
+def _stream_satu_panggilan(client, messages):
+    """Satu panggilan LLM streaming, dengan retry+backoff saat error koneksi.
+
+    Aman untuk dicoba ulang: bila gagal SEBELUM ada teks tercetak/terucap,
+    panggilan diulang dari awal. Kalau sudah terlanjur keluar sebagian (atau
+    retry habis), error dilempar ke pemanggil. Return (narasi, tool_calls).
+    """
+    delay = config.LLM_RETRY_BASE_DELAY
+    for percobaan in range(1, config.LLM_MAX_RETRIES + 1):
+        text_parts = []
+        tool_calls = {}          # tool call datang bertahap lewat stream (per index)
+        sudah_keluar = False     # sudah ada teks tercetak/terucap?
+        speaker = StreamSpeaker()
+        pencetak = _BoldPrinter()  # **tebal** -> bold ANSI saat dicetak
+        try:
+            stream = client.chat.completions.create(
+                model=config.QWEN_MODEL,
+                messages=messages,
+                tools=TOOLS_SCHEMA,
+                temperature=config.QWEN_TEMPERATURE,
+                stream=True,
+            )
+            print("\n", end="", flush=True)
+            for chunk in stream:
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
+
+                if getattr(delta, "content", None):
+                    sudah_keluar = True
+                    pencetak.feed(delta.content)
+                    text_parts.append(delta.content)
+                    speaker.feed(delta.content)
+
+                for tc in (getattr(delta, "tool_calls", None) or []):
+                    slot = tool_calls.setdefault(tc.index, {"id": "", "name": "", "args": ""})
+                    if tc.id:
+                        slot["id"] = tc.id
+                    if tc.function and tc.function.name:
+                        slot["name"] = tc.function.name
+                    if tc.function and tc.function.arguments:
+                        slot["args"] += tc.function.arguments
+            pencetak.close()
+            print()
+            speaker.close()
+            return "".join(text_parts), tool_calls
+
+        except _TRANSIENT_ERRORS as e:
+            pencetak.close()
+            try:
+                speaker.close()
+            except Exception:
+                pass
+            # Sudah terlanjur keluar sebagian, atau percobaan terakhir -> menyerah.
+            if sudah_keluar or percobaan == config.LLM_MAX_RETRIES:
+                raise
+            print(f"{_DIM}  koneksi bermasalah ({type(e).__name__}), "
+                  f"coba lagi {percobaan}/{config.LLM_MAX_RETRIES - 1} "
+                  f"dalam {delay:.0f}s…{_RESET}")
+            time.sleep(delay)
+            delay = min(delay * 2, 30)
+
+
 def hubungkan_tool(client, messages):
     """Loop satu giliran: panggil model, eksekusi tool, ulangi sampai selesai."""
     _pangkas_history(messages)
     for _ in range(config.MAX_TOOL_ITERS):
-        stream = client.chat.completions.create(
-            model=config.QWEN_MODEL,
-            messages=messages,
-            tools=TOOLS_SCHEMA,
-            temperature=config.QWEN_TEMPERATURE,
-            stream=True,
-        )
-
-        text_parts = []
-        # Akumulasi tool call yang datang bertahap lewat stream (per index).
-        tool_calls = {}
-        # Speaker latar: mulai membacakan per kalimat begitu kalimat siap,
-        # sambil teks berikutnya masih mengalir (lewat satu aliran, tanpa jeda).
-        speaker = StreamSpeaker()
-        pencetak = _BoldPrinter()  # **tebal** -> bold ANSI saat dicetak
-
-        print("\n", end="", flush=True)
-        for chunk in stream:
-            if not chunk.choices:
-                continue
-            delta = chunk.choices[0].delta
-
-            if getattr(delta, "content", None):
-                pencetak.feed(delta.content)
-                text_parts.append(delta.content)
-                speaker.feed(delta.content)
-
-            for tc in (getattr(delta, "tool_calls", None) or []):
-                slot = tool_calls.setdefault(tc.index, {"id": "", "name": "", "args": ""})
-                if tc.id:
-                    slot["id"] = tc.id
-                if tc.function and tc.function.name:
-                    slot["name"] = tc.function.name
-                if tc.function and tc.function.arguments:
-                    slot["args"] += tc.function.arguments
-        pencetak.close()
-        print()
-
-        # Tunggu sisa narasi selesai diucapkan sebelum lanjut (mis. jalankan tool).
-        speaker.close()
-        narasi = "".join(text_parts)
+        narasi, tool_calls = _stream_satu_panggilan(client, messages)
 
         # Susun pesan balasan asisten (teks + permintaan tool, jika ada).
         assistant_msg = {"role": "assistant", "content": narasi}

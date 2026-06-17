@@ -3,7 +3,36 @@
 import io
 import sys
 
+import pytest
+
 from voca import agent, config
+
+
+# --- util tiruan untuk tes retry streaming ---------------------------------
+class _Boom(Exception):
+    """Error sementara palsu untuk menguji retry."""
+
+
+def _chunk(teks):
+    delta = type("D", (), {"content": teks, "tool_calls": None})()
+    choice = type("Ch", (), {"delta": delta})()
+    return type("Chunk", (), {"choices": [choice]})()
+
+
+class _FlakyClient:
+    """Client palsu: gagal `gagal_n` kali dulu, lalu sukses balas 'halo'."""
+
+    def __init__(self, gagal_n):
+        self.gagal_n = gagal_n
+        self.calls = 0
+        self.chat = self
+        self.completions = self
+
+    def create(self, **_kw):
+        self.calls += 1
+        if self.calls <= self.gagal_n:
+            raise _Boom("koneksi putus")
+        return iter([_chunk("halo")])
 
 
 def _render_bold(chunks):
@@ -98,3 +127,26 @@ def test_sesi_none_saat_disabled(tmp_path, monkeypatch):
     monkeypatch.setattr(agent, "WORKSPACE", tmp_path)
     monkeypatch.setattr(config, "SESSION_ENABLED", False)
     assert agent._muat_sesi() is None
+
+
+def test_stream_retry_lalu_sukses(monkeypatch):
+    monkeypatch.setattr(config, "VOICE_ENABLED", False)      # tanpa audio
+    monkeypatch.setattr(config, "LLM_RETRY_BASE_DELAY", 0)   # tanpa jeda nyata
+    monkeypatch.setattr(config, "LLM_MAX_RETRIES", 4)
+    monkeypatch.setattr(agent, "_TRANSIENT_ERRORS", (_Boom,))
+    client = _FlakyClient(gagal_n=2)
+    narasi, tool_calls = agent._stream_satu_panggilan(client, [{"role": "user", "content": "hi"}])
+    assert narasi == "halo"
+    assert tool_calls == {}
+    assert client.calls == 3                                  # 2 gagal + 1 sukses
+
+
+def test_stream_retry_menyerah_setelah_batas(monkeypatch):
+    monkeypatch.setattr(config, "VOICE_ENABLED", False)
+    monkeypatch.setattr(config, "LLM_RETRY_BASE_DELAY", 0)
+    monkeypatch.setattr(config, "LLM_MAX_RETRIES", 3)
+    monkeypatch.setattr(agent, "_TRANSIENT_ERRORS", (_Boom,))
+    client = _FlakyClient(gagal_n=99)
+    with pytest.raises(_Boom):
+        agent._stream_satu_panggilan(client, [{"role": "user", "content": "hi"}])
+    assert client.calls == 3                                  # berhenti tepat di batas

@@ -27,6 +27,8 @@ QWEN_BASE_URL = os.getenv(
 )
 QWEN_MODEL = os.getenv("QWEN_MODEL", "qwen-plus")
 QWEN_TEMPERATURE = float(os.getenv("QWEN_TEMPERATURE", "0.3"))  # rendah = lebih fokus/akurat
+LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "4"))        # percobaan saat error koneksi LLM
+LLM_RETRY_BASE_DELAY = float(os.getenv("LLM_RETRY_BASE_DELAY", "2.0"))  # jeda awal retry (detik, naik eksponensial)
 
 # --- Batas perilaku agent (anti-boros, anti-nyangkut, anti-overflow) -------
 MAX_TOOL_ITERS = int(os.getenv("MAX_TOOL_ITERS", "15"))         # maks putaran tool per giliran
