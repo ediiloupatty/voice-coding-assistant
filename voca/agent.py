@@ -15,6 +15,7 @@ Dua mode: teks (default) dan hands-free (`--voice`).
 
 import json
 import re
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -77,6 +78,23 @@ def _banner(handsfree: bool, lebar: int = 56) -> None:
 def _hint(teks: str) -> None:
     """Baris petunjuk redup di bawah banner."""
     print(f"{_DIM}{teks}{_RESET}\n")
+
+
+def _kotak_input(petunjuk: str = "") -> str:
+    """Prompt input ber-kotak ala Claude CLI: border + '›' di dalamnya.
+
+    Border atas-bawah membungkus baris ketik; petunjuk redup tampil di bawah.
+    """
+    lebar = min(shutil.get_terminal_size((80, 20)).columns, 100)
+    garis = "─" * (lebar - 2)
+    print(f"\n{_CYAN}╭{garis}╮{_RESET}")
+    try:
+        teks = input(f"{_CYAN}│{_RESET} {_GREEN}›{_RESET} ")
+    finally:
+        print(f"{_CYAN}╰{garis}╯{_RESET}")
+        if petunjuk:
+            print(f"{_DIM}  {petunjuk}{_RESET}")
+    return teks.strip()
 
 
 class _BoldPrinter:
@@ -436,11 +454,10 @@ def _voice_confirm(prompt: str) -> bool:
 def run_text_mode(client, messages):
     """Mode teks: ketik perintah, atau 'v' + ENTER untuk bicara sekali."""
     _banner(handsfree=False)
-    _hint("ketik perintah  ·  'v' + Enter untuk bicara  ·  'keluar' untuk berhenti")
 
     while True:
         try:
-            perintah = input(f"{_GREEN}❯{_RESET} ").strip()
+            perintah = _kotak_input("'v' + Enter untuk bicara  ·  'keluar' untuk berhenti")
         except (EOFError, KeyboardInterrupt):
             print(f"\n{_DIM}Sampai jumpa.{_RESET}")
             break
