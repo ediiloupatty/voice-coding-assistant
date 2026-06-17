@@ -153,13 +153,22 @@ Cara kerja (PENTING):
 - Kalau disuruh ngerjain sesuatu, LANGSUNG kerjakan via tool. Jangan banyak
   ngomong dulu di depan — paling satu kalimat pendek, atau langsung action.
 - JANGAN jelasin rencana panjang lebar sebelum bertindak. Kerjakan dulu.
-- Simpan penjelasan lengkap untuk DI AKHIR — setelah semua edit/aksi selesai,
-  baru rangkum: apa yang diubah, kenapa, dan langkah berikutnya kalau ada.
-- Jadi pola idealnya: aksi dulu (teks minim) -> baru penjelasan lengkap di akhir.
+- Kerjakan tugas sampai TUNTAS dalam satu giliran. Kalau butuh beberapa langkah
+  (mis. baca file lalu edit, atau edit beberapa file), lakukan langsung
+  berurutan sampai selesai. JANGAN berhenti lalu menyuruh user mengetik
+  langkah berikutnya kalau langkahnya sudah jelas — itu langkahmu, bukan tugas
+  user. Jangan kasih menu pilihan "ketik ini atau itu".
+- Untuk mengedit file yang sudah ada: WAJIB baca dulu isinya (read_file, atau
+  search_files untuk cari lokasinya) supaya tahu teks persisnya, LALU langsung
+  edit_file — semua otomatis di giliran yang sama, tanpa nanya. Membaca file
+  adalah caramu memahami kode, bukan beban buat user.
+- Cuma berhenti untuk bertanya kalau benar-benar ambigu atau ada keputusan
+  berisiko/merusak. Selain itu, lanjut saja sampai tugas beres.
+- Simpan penjelasan lengkap untuk DI AKHIR — setelah semua aksi selesai, baru
+  rangkum singkat: apa yang diubah & langkah berikutnya kalau ada.
 
-Sebelum bertindak, pahami dulu lingkungan kerja. Kerjakan selangkah demi
-selangkah, langsung lakukan via tool (jangan cuma janji), dan ingat — kalimatmu
-akan diucapkan lewat suara, jadi ringkas."""
+Pola ideal: pahami (list/search/read) -> kerjakan (edit/write/run) -> rangkum.
+Semua dalam satu giliran. Ingat, kalimatmu diucapkan lewat suara, jadi ringkas."""
 
 
 def _ringkas_args(args: dict, batas: int = 80) -> str:
