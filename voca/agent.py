@@ -10,7 +10,7 @@ Alur kerja:
   3. Setiap aksi yang mengubah sistem minta konfirmasi (keyboard / suara).
   4. Model menarasikan progres secara real-time (teks + suara Piper).
 
-Dua mode: teks (default) dan hands-free (`--voice`).
+Dua mode: hands-free (default) dan teks murni (`--text`).
 """
 
 import json
@@ -28,117 +28,15 @@ _TRANSIENT_ERRORS = (APIConnectionError, APITimeoutError,
                      RateLimitError, InternalServerError)
 
 from . import config
+from . import lang
 from .tools import TOOLS_SCHEMA, TOOL_FUNCTIONS, WORKSPACE, list_files, set_confirm_handler
 from .voice import StreamSpeaker, warmup, speak
 
-# ---------------------------------------------------------------------------
-# Tampilan terminal — gaya CLI minimalis & profesional
-# ---------------------------------------------------------------------------
-_DIM, _BOLD, _CYAN, _GREEN, _RED, _RESET = (
-    "\033[2m", "\033[1m", "\033[36m", "\033[32m", "\033[31m", "\033[0m",
-)
+from rich.markdown import Markdown
+from rich.live import Live
 
-
-def _pendekkan(teks: str, maks: int) -> str:
-    """Pangkas teks panjang dari depan, sisakan ekornya (mis. path)."""
-    return teks if len(teks) <= maks else "…" + teks[-(maks - 1):]
-
-
-def _kotak(rows, lebar: int = 56) -> None:
-    """Cetak kotak rapi. Tiap row = (teks_polos_untuk_ukur, teks_berwarna)."""
-    print(f"{_CYAN}╭{'─' * lebar}╮{_RESET}")
-    for polos, warna in rows:
-        pad = " " * max(lebar - 2 - len(polos), 0)
-        print(f"{_CYAN}│{_RESET} {warna}{pad} {_CYAN}│{_RESET}")
-    print(f"{_CYAN}╰{'─' * lebar}╯{_RESET}")
-
-
-def _info(label: str, nilai: str) -> tuple[str, str]:
-    """Baris info berlabel untuk banner (label redup, nilai normal)."""
-    polos = f"{label:<8}{nilai}"
-    warna = f"{_DIM}{label:<8}{_RESET}{nilai}"
-    return polos, warna
-
-
-def _banner(handsfree: bool, lebar: int = 56) -> None:
-    """Banner pembuka ber-box dengan info model, folder, dan mode."""
-    ws = _pendekkan(str(WORKSPACE), lebar - 2 - 8)
-    rows = [
-        ("Voca  voice coding assistant",
-         f"{_BOLD}Voca{_RESET}{_DIM}  voice coding assistant{_RESET}"),
-        ("", ""),
-        _info("model", config.QWEN_MODEL),
-        _info("folder", ws),
-        _info("mode", "hands-free (suara)" if handsfree else "teks"),
-    ]
-    print()
-    _kotak(rows, lebar)
-
-
-def _hint(teks: str) -> None:
-    """Baris petunjuk redup di bawah banner."""
-    print(f"{_DIM}{teks}{_RESET}\n")
-
-
-def _kotak_input(petunjuk: str = "") -> str:
-    """Prompt input ber-kotak ala Claude CLI: border + '›' di dalamnya.
-
-    Border atas-bawah membungkus baris ketik; petunjuk redup tampil di bawah.
-    """
-    lebar = min(shutil.get_terminal_size((80, 20)).columns, 100)
-    garis = "─" * (lebar - 2)
-    print(f"\n{_CYAN}╭{garis}╮{_RESET}")
-    try:
-        teks = input(f"{_CYAN}│{_RESET} {_GREEN}›{_RESET} ")
-    finally:
-        print(f"{_CYAN}╰{garis}╯{_RESET}")
-        if petunjuk:
-            print(f"{_DIM}  {petunjuk}{_RESET}")
-    return teks.strip()
-
-
-class _BoldPrinter:
-    """Cetak teks streaming sambil ubah **tebal** (markdown) jadi bold ANSI asli.
-
-    Tahan terhadap '**' yang kepotong antar-chunk: '*' di ujung ditahan dulu
-    sampai karakter berikutnya datang, baru diputuskan toggle bold atau bukan.
-    """
-
-    def __init__(self):
-        self._pending = ""   # '*' tunggal yang belum pasti pasangannya
-        self._bold = False
-
-    def feed(self, teks: str) -> None:
-        s = self._pending + teks
-        self._pending = ""
-        out = []
-        i = 0
-        while i < len(s):
-            if s[i] == "*":
-                if i + 1 == len(s):           # '*' di ujung -> tunggu chunk berikut
-                    self._pending = "*"
-                    break
-                if s[i + 1] == "*":           # '**' -> toggle bold
-                    self._bold = not self._bold
-                    out.append(_BOLD if self._bold else _RESET)
-                    i += 2
-                    continue
-                out.append("*")               # '*' tunggal -> apa adanya
-            else:
-                out.append(s[i])
-            i += 1
-        if out:
-            sys.stdout.write("".join(out))
-            sys.stdout.flush()
-
-    def close(self) -> None:
-        if self._pending:
-            sys.stdout.write(self._pending)
-            self._pending = ""
-        if self._bold:                        # tutup bold yang belum sempat ditutup
-            sys.stdout.write(_RESET)
-            self._bold = False
-        sys.stdout.flush()
+from . import ui
+from .ui import console
 
 
 SYSTEM_PROMPT = """Kamu adalah Voca, asisten coding berbasis suara.
@@ -196,6 +94,13 @@ Cara kerja (PENTING):
   atau memperlihatkan kode yang mau ditulis). Langsung lakukan lewat
   edit_file/write_file — diff perubahannya sudah otomatis ditampilkan ke user.
   Cukup jelaskan dengan kata-kata singkat, bukan dengan kode.
+- EKSPLORASI DULU sebelum memilih aset: kalau user minta ganti/pakai sesuatu
+  yang ada pilihannya di folder (icon, gambar, suara, tema, font, dsb.) dan
+  kamu BELUM tahu isinya — WAJIB list_files folder itu dulu. Baru setelah tahu
+  daftar pilihannya, pilih yang paling cocok atau tanyakan kalau benar-benar
+  tidak jelas. JANGAN menebak nama file atau langsung edit tanpa cek dulu.
+  Contoh: user bilang "ganti icon, ada di folder assets/icons" → list_files
+  assets/icons dulu, lihat apa yang ada, baru edit.
 - Cuma berhenti untuk bertanya kalau benar-benar ambigu atau ada keputusan
   berisiko/merusak. Selain itu, lanjut saja sampai tugas beres.
 - Simpan penjelasan lengkap untuk DI AKHIR — setelah semua aksi selesai, baru
@@ -287,18 +192,6 @@ def _muat_sesi():
     return None
 
 
-def _tanya_resume(messages) -> bool:
-    """Tanya user apakah mau lanjut dari sesi sebelumnya."""
-    giliran = sum(1 for m in messages if m.get("role") == "user")
-    try:
-        jawab = input(
-            f"{_DIM}Ada sesi sebelumnya ({giliran} giliran). Lanjutkan? [y/N]{_RESET} "
-        ).strip().lower()
-    except (EOFError, KeyboardInterrupt):
-        return False
-    return jawab in ("y", "yes", "ya")
-
-
 def _stream_satu_panggilan(client, messages):
     """Satu panggilan LLM streaming, dengan retry+backoff saat error koneksi.
 
@@ -312,7 +205,17 @@ def _stream_satu_panggilan(client, messages):
         tool_calls = {}          # tool call datang bertahap lewat stream (per index)
         sudah_keluar = False     # sudah ada teks tercetak/terucap?
         speaker = StreamSpeaker()
-        pencetak = _BoldPrinter()  # **tebal** -> bold ANSI saat dicetak
+
+        # Fase 1: spinner "berpikir" (transient — hilang begitu jawaban mulai).
+        console.print()
+        spinner = Live(ui.spinner_berpikir(), console=console,
+                       refresh_per_second=12, transient=True)
+        spinner.start()
+        body = None              # Live untuk isi jawaban (Markdown), dibuat saat token pertama
+
+        def _tutup_live():
+            (body or spinner).stop()
+
         try:
             stream = client.chat.completions.create(
                 model=config.QWEN_MODEL,
@@ -321,17 +224,23 @@ def _stream_satu_panggilan(client, messages):
                 temperature=config.QWEN_TEMPERATURE,
                 stream=True,
             )
-            print("\n", end="", flush=True)
             for chunk in stream:
                 if not chunk.choices:
                     continue
                 delta = chunk.choices[0].delta
 
                 if getattr(delta, "content", None):
+                    if not sudah_keluar:
+                        # Token pertama: buang spinner, cetak penanda, mulai render isi.
+                        spinner.stop()
+                        ui.header_jawaban()
+                        body = Live(Markdown(""), console=console,
+                                    refresh_per_second=15, transient=False)
+                        body.start()
                     sudah_keluar = True
-                    pencetak.feed(delta.content)
                     text_parts.append(delta.content)
                     speaker.feed(delta.content)
+                    body.update(Markdown("".join(text_parts)))
 
                 for tc in (getattr(delta, "tool_calls", None) or []):
                     slot = tool_calls.setdefault(tc.index, {"id": "", "name": "", "args": ""})
@@ -341,13 +250,13 @@ def _stream_satu_panggilan(client, messages):
                         slot["name"] = tc.function.name
                     if tc.function and tc.function.arguments:
                         slot["args"] += tc.function.arguments
-            pencetak.close()
-            print()
+
+            _tutup_live()
             speaker.close()
             return "".join(text_parts), tool_calls
 
         except _TRANSIENT_ERRORS as e:
-            pencetak.close()
+            _tutup_live()
             try:
                 speaker.close()
             except Exception:
@@ -355,9 +264,9 @@ def _stream_satu_panggilan(client, messages):
             # Sudah terlanjur keluar sebagian, atau percobaan terakhir -> menyerah.
             if sudah_keluar or percobaan == config.LLM_MAX_RETRIES:
                 raise
-            print(f"{_DIM}  koneksi bermasalah ({type(e).__name__}), "
-                  f"coba lagi {percobaan}/{config.LLM_MAX_RETRIES - 1} "
-                  f"dalam {delay:.0f}s…{_RESET}")
+            ui.info(f"  koneksi bermasalah ({type(e).__name__}), "
+                    f"coba lagi {percobaan}/{config.LLM_MAX_RETRIES - 1} "
+                    f"dalam {delay:.0f}s…")
             time.sleep(delay)
             delay = min(delay * 2, 30)
 
@@ -392,7 +301,8 @@ def hubungkan_tool(client, messages):
                 args = json.loads(tc["args"]) if tc["args"] else {}
             except json.JSONDecodeError:
                 args = {}
-            print(f"\n{_DIM}  › {tc['name']}({_ringkas_args(args)}){_RESET}")
+            console.print()
+            ui.baris_tool(tc["name"], _ringkas_args(args))
 
             if fungsi is None:
                 hasil = f"Tool tidak dikenal: {tc['name']}"
@@ -410,7 +320,7 @@ def hubungkan_tool(client, messages):
         # Lanjutkan loop: model lihat hasil tool lalu lanjut bekerja.
 
     # Batas iterasi tercapai tanpa selesai -> stop biar tak muter & boros token.
-    print(f"\n{_DIM}  batas {config.MAX_TOOL_ITERS} langkah tercapai, berhenti dulu.{_RESET}")
+    ui.info(f"\n  batas {config.MAX_TOOL_ITERS} langkah tercapai, berhenti dulu.")
     pesan_stop = ("Ini butuh banyak langkah, aku berhenti dulu biar nggak muter. "
                   "Kasih tahu mau lanjut ke bagian mana.")
     messages.append({"role": "assistant", "content": pesan_stop})
@@ -420,9 +330,35 @@ def hubungkan_tool(client, messages):
 # ---------------------------------------------------------------------------
 # Pengenalan ucapan ya/tidak & kata berhenti (untuk mode suara)
 # ---------------------------------------------------------------------------
+# Kata-kata dibuat gabungan ID+EN supaya konfirmasi & 'berhenti' jalan di kedua bahasa.
 _KATA_YA = {"ya", "iya", "yes", "boleh", "lanjut", "setuju", "oke", "ok",
-            "gas", "silakan", "jalan", "lakukan"}
-_KATA_STOP = {"berhenti", "keluar", "stop", "udahan", "udah"}
+            "gas", "silakan", "jalan", "lakukan",
+            "yeah", "yep", "yup", "sure", "go", "proceed", "okay"}
+_KATA_TIDAK = {"tidak", "jangan", "batal", "bukan", "no", "nggak", "ngga", "gk", "batalkan",
+               "nope", "cancel", "dont", "stop"}
+_KATA_STOP = {"berhenti", "keluar", "stop", "udahan", "udah", "quit", "exit", "bye"}
+
+
+def _set_bahasa(code: str, messages) -> None:
+    """Ganti bahasa aktif: perbarui directive untuk LLM lalu beri tahu user (teks + suara)."""
+    lang.set(code)
+    messages[0]["content"] = SYSTEM_PROMPT + "\n\n" + lang.directive()
+    pesan = lang.switched_msg()
+    console.print(f"\n[accent.hi]{ui.SIGIL}[/] {pesan}")
+    speak(pesan)
+
+
+def _cek_ganti_bahasa(perintah: str, messages) -> bool:
+    """Tangani perintah ganti bahasa. Return True kalau perintah memang soal bahasa
+    (caller harus skip giliran, tidak mengirim ke LLM)."""
+    code = lang.detect_command(perintah)
+    if not code:
+        return False
+    if code != lang.code():
+        _set_bahasa(code, messages)
+    else:
+        console.print(f"[muted]Sudah pakai {lang.name()}.[/muted]")
+    return True
 
 
 def _minta_keluar(perintah: str) -> bool:
@@ -439,11 +375,17 @@ def _voice_confirm(prompt: str) -> bool:
     """Konfirmasi via suara: AI bertanya, user menjawab 'ya'/'tidak'."""
     from .listen import listen_auto
 
-    print(f"\n{_CYAN}?{_RESET} {prompt}")
+    ui.tanya_konfirmasi_suara(prompt)
     speak(prompt + " Jawab ya atau tidak.")
     jawab = listen_auto().lower()
-    print(f"{_DIM}(suara) jawaban:{_RESET} {jawab!r}")
-    setuju = bool(set(re.findall(r"\w+", jawab)) & _KATA_YA)
+    ui.info(f"(suara) jawaban: {jawab!r}")
+    
+    kata_jawaban = set(re.findall(r"\w+", jawab))
+    if kata_jawaban & _KATA_TIDAK:
+        setuju = False
+    else:
+        setuju = bool(kata_jawaban & _KATA_YA)
+        
     speak("Oke, saya lanjutkan." if setuju else "Baik, saya batalkan.")
     return setuju
 
@@ -453,13 +395,15 @@ def _voice_confirm(prompt: str) -> bool:
 # ---------------------------------------------------------------------------
 def run_text_mode(client, messages):
     """Mode teks: ketik perintah, atau 'v' + ENTER untuk bicara sekali."""
-    _banner(handsfree=False)
+    ui.banner(config.QWEN_MODEL, WORKSPACE, "teks")
 
     while True:
         try:
-            perintah = _kotak_input("'v' + Enter untuk bicara  ·  'keluar' untuk berhenti")
+            perintah = ui.kotak_input(
+                f"'v' + Enter untuk bicara  {ui.DOT}  'english'/'indonesia' ganti bahasa"
+                f"  {ui.DOT}  'keluar' berhenti")
         except (EOFError, KeyboardInterrupt):
-            print(f"\n{_DIM}Sampai jumpa.{_RESET}")
+            ui.selesai()
             break
 
         if perintah.lower() in ("v", "suara", "voice"):
@@ -467,95 +411,145 @@ def run_text_mode(client, messages):
                 from .listen import listen
                 perintah = listen()
             except Exception as e:
-                print(f"{_DIM}  input suara gagal: {e}{_RESET}")
+                ui.info(f"  input suara gagal: {e}")
                 continue
-            print(f"{_DIM}(suara){_RESET} {perintah}")
+            if perintah:
+                ui.pesan_user(perintah)
 
         if not perintah:
             continue
+        if _cek_ganti_bahasa(perintah, messages):
+            _simpan_sesi(messages)
+            continue
         if perintah.lower() in ("keluar", "exit", "quit"):
-            print(f"{_DIM}Sampai jumpa.{_RESET}")
+            ui.selesai()
             break
 
         messages.append({"role": "user", "content": perintah})
         try:
             hubungkan_tool(client, messages)
         except Exception as e:
-            print(f"\n{_RED}Error:{_RESET} {e}")
+            ui.error(e)
         _simpan_sesi(messages)
 
 
 def run_handsfree_mode(client, messages):
     """Mode hands-free: dengar otomatis, ATAU ketik kapan saja (tekan ENTER)."""
-    from .listen import listen_auto_atau_ketik
+    from .listen import _rekam_atau_ketik, transcribe
 
     set_confirm_handler(_voice_confirm)  # konfirmasi aksi lewat suara
 
-    _banner(handsfree=True)
-    _hint("ngomong langsung, atau tekan ENTER untuk ketik  ·  'berhenti' = keluar  ·  Ctrl+C")
+    ui.banner(config.QWEN_MODEL, WORKSPACE, "hands-free (suara)")
+    ui.hint(f"ngomong / ketik perintah  {ui.DOT}  'english'/'indonesia' ganti bahasa"
+            f"  {ui.DOT}  'berhenti' keluar")
     speak("Halo, saya siap membantu. Silakan bicara, atau ketik kalau mau.")
 
-    while True:
-        print(f"\n{_DIM}mendengarkan…  (ngomong, atau tekan ENTER untuk ketik){_RESET}")
-        try:
-            jenis, perintah = listen_auto_atau_ketik()
-        except KeyboardInterrupt:
-            speak("Sampai jumpa!")
-            print(f"\n{_DIM}Sampai jumpa.{_RESET}")
-            break
+    H = max(15, shutil.get_terminal_size().lines)
+    W = shutil.get_terminal_size().columns
 
-        # User tekan ENTER tanpa langsung mengetik -> tampilkan kotak input.
-        if jenis == "ketik" and not perintah:
+    try:
+        # Pindahkan kursor ke bottom of scroll region (H-3)
+        print(f"\033[1;{H-3}r", end="", flush=True)
+        print(f"\033[{H-3};1H", end="", flush=True)
+
+        while True:
+            # Dapatkan ukuran terminal terbaru jika di-resize
+            H = max(15, shutil.get_terminal_size().lines)
+            W = shutil.get_terminal_size().columns
+
+            # Pastikan scrolling region aktif untuk H-3
+            print(f"\033[1;{H-3}r", end="", flush=True)
+
+            # Gambar bar status di bagian paling bawah
+            ui.status_bar(H, W, "dengerin")
+
             try:
-                perintah = _kotak_input("'berhenti' untuk keluar  ·  Enter kosong = batal")
-            except (EOFError, KeyboardInterrupt):
+                jenis, data = _rekam_atau_ketik()
+            except KeyboardInterrupt:
+                break
+
+            # Reset warna (grey bg dari input bar) & kembalikan kursor ke scroll region
+            print(f"\033[0m\033[{H-3};1H", end="", flush=True)
+
+            if jenis == "ketik":
+                perintah = data
+            elif jenis == "suara":
+                if data is None:
+                    continue
+                ui.status_bar(H, W, "transkripsi")
+                perintah = transcribe(data)
+            else:
                 continue
 
-        if not perintah:
-            continue  # tidak terdengar suara / ketikan kosong -> dengar lagi
-        label = "(ketik)" if jenis == "ketik" else "(suara)"
-        print(f"{_DIM}{label}{_RESET} {perintah}")
+            if not perintah:
+                continue
 
-        if _minta_keluar(perintah):
-            speak("Baik, sampai jumpa!")
-            print(f"{_DIM}Sampai jumpa.{_RESET}")
-            break
+            # Cetak perintah user di scroll region (echo)
+            ui.pesan_user(perintah)
 
-        messages.append({"role": "user", "content": perintah})
-        try:
-            hubungkan_tool(client, messages)
-        except Exception as e:
-            print(f"\n{_RED}Error:{_RESET} {e}")
-        _simpan_sesi(messages)
+            # Ganti bahasa? tangani langsung tanpa lewat LLM.
+            if _cek_ganti_bahasa(perintah, messages):
+                _simpan_sesi(messages)
+                continue
+
+            if _minta_keluar(perintah):
+                speak("Baik, sampai jumpa!")
+                ui.selesai()
+                break
+
+            ui.status_bar(H, W, "berpikir")
+            # Kembalikan kursor ke scroll region
+            print(f"\033[{H-3};1H", end="", flush=True)
+
+            messages.append({"role": "user", "content": perintah})
+            try:
+                hubungkan_tool(client, messages)
+            except Exception as e:
+                ui.error(e)
+            _simpan_sesi(messages)
+
+    finally:
+        # Reset warna + scroll region ke normal, kursor ke baris terakhir
+        print(f"\033[0m\033[r\033[{H};1H\n", end="", flush=True)
 
 
 def main():
     if not config.QWEN_API_KEY:
-        print(f"{_RED}Error:{_RESET} DASHSCOPE_API_KEY belum diset. "
-              f"Salin .env.example ke .env, lalu isi key-mu.")
+        ui.error("DASHSCOPE_API_KEY belum diset. Salin .env.example ke .env, lalu isi key-mu.")
         sys.exit(1)
 
     client = OpenAI(api_key=config.QWEN_API_KEY, base_url=config.QWEN_BASE_URL)
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": SYSTEM_PROMPT + "\n\n" + lang.directive()},
         {"role": "system",
          "content": f"Struktur folder kerja saat ini ({WORKSPACE}):\n{list_files('.')}"},
     ]
 
-    # Lanjutkan sesi sebelumnya kalau ada & user setuju.
-    tersimpan = _muat_sesi()
-    if tersimpan and _tanya_resume(tersimpan):
-        messages = tersimpan
-        print(f"{_DIM}Sesi dilanjutkan.{_RESET}")
+    # Secara default jalankan mode hands-free (suara).
+    # Gunakan flag --text untuk mode ketik murni jika dibutuhkan.
+    text_mode = any(a in ("--text", "-t") for a in sys.argv[1:])
 
-    warmup()  # muat model suara di awal agar balasan pertama tidak tertunda
+    # Jalankan seluruh sesi di layar terpisah agar terminal tetap bersih.
+    ui.buka_layar()
+    try:
+        # Lanjutkan sesi sebelumnya kalau ada & user setuju.
+        tersimpan = _muat_sesi()
+        if tersimpan:
+            giliran = sum(1 for m in tersimpan if m.get("role") == "user")
+            if ui.tanya_resume(giliran):
+                messages = tersimpan
+                ui.info("Sesi dilanjutkan.")
 
-    # Mode hands-free kalau dijalankan dengan flag --voice / --suara.
-    handsfree = any(a in ("--voice", "-v", "--handsfree", "--suara") for a in sys.argv[1:])
-    if handsfree:
-        run_handsfree_mode(client, messages)
-    else:
-        run_text_mode(client, messages)
+        warmup()  # muat model suara di awal agar balasan pertama tidak tertunda
+
+        if text_mode:
+            run_text_mode(client, messages)
+        else:
+            run_handsfree_mode(client, messages)
+    except KeyboardInterrupt:
+        pass  # Ctrl+C = keluar bersih, tanpa traceback berantakan
+    finally:
+        ui.tutup_layar()  # kembalikan terminal ke kondisi semula
 
 
 if __name__ == "__main__":

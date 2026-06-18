@@ -11,6 +11,7 @@ Dependensi sistem: aplay (alsa-utils) untuk memutar audio mentah dari Piper,
 dan ffplay (ffmpeg) untuk fallback gTTS. Pitch-shift pakai ffmpeg rubberband.
 """
 
+import os
 import queue
 import re
 import shutil
@@ -20,9 +21,11 @@ import tempfile
 import threading
 
 from . import config
+from . import lang
 
-_voice = None  # model Piper di-cache setelah dimuat sekali
-_syn = None    # SynthesisConfig di-cache
+_voice = None       # model Piper di-cache setelah dimuat sekali
+_voice_path = None  # path model yang sedang dimuat (untuk deteksi ganti bahasa)
+_syn = None         # SynthesisConfig di-cache
 
 
 def _get_syn_config():
@@ -35,12 +38,20 @@ def _get_syn_config():
 
 
 def _get_voice():
-    """Muat model Piper sekali saja (lazy, lalu di-cache)."""
-    global _voice
-    if _voice is None:
+    """Muat model Piper untuk bahasa aktif (lazy + cache, muat ulang bila ganti)."""
+    global _voice, _voice_path
+    target = lang.piper_model()
+    if _voice is None or _voice_path != target:
         from piper import PiperVoice
-        _voice = PiperVoice.load(config.PIPER_MODEL)
+        _voice = PiperVoice.load(target)
+        _voice_path = target
     return _voice
+
+
+def _piper_available() -> bool:
+    """True kalau model Piper untuk bahasa aktif benar-benar ada di disk."""
+    p = lang.piper_model()
+    return bool(p) and os.path.exists(p)
 
 
 def _pitch_aktif() -> bool:
@@ -127,7 +138,7 @@ class _SoundDevicePlayer:
 
 def _open_player(sr: int):
     """Pilih pemutar audio sesuai OS. Punya .write(bytes) dan .close()."""
-    if sys.platform.startswith("linux"):
+    if sys.platform.startswith("linux") and shutil.which("aplay") is not None:
         return _AplayPlayer(sr)
     return _SoundDevicePlayer(sr)
 
@@ -166,7 +177,7 @@ def _eja_inggris(teks: str) -> str:
 def _bersihkan_teks(teks: str) -> str:
     """Buang elemen yang tidak enak dibacakan: kode, emoji, markdown, URL."""
     teks = re.sub(r"```.*?```", " ", teks, flags=re.DOTALL)   # blok kode
-    teks = re.sub(r"`[^`]*`", " ", teks)                       # inline code
+    teks = teks.replace("`", "")                               # inline code (keep text, strip backticks)
     teks = re.sub(r"https?://\S+", " ", teks)                  # URL
     teks = re.sub(r"[#*_>`]", " ", teks)                       # penanda markdown
     teks = re.sub(r"^\s*[-•]\s*", "", teks, flags=re.MULTILINE)
@@ -175,7 +186,7 @@ def _bersihkan_teks(teks: str) -> str:
         " ", teks,
     )
     teks = re.sub(r"\s+", " ", teks).strip()                  # rapikan spasi
-    if config.SPEAK_PHONETIC:
+    if lang.phonetic():
         teks = _eja_inggris(teks)                             # lafalkan kata Inggris
     return teks
 
@@ -205,7 +216,7 @@ def _gtts_play(teks: str) -> None:
     try:
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
             path = f.name
-        gTTS(text=teks, lang=config.VOICE_LANG).save(path)
+        gTTS(text=teks, lang=lang.gtts()).save(path)
         subprocess.run(
             ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", path],
             check=False,
@@ -238,14 +249,15 @@ def speak(teks: str) -> None:
         return
 
     try:
-        # Utama: Piper lokal. Kalau gagal (mis. model hilang), jatuh ke gTTS.
-        try:
-            _piper_stream_play(bersih)
-            return
-        except KeyboardInterrupt:
-            raise
-        except Exception as e:
-            print(f"   [Piper gagal ({e}), pakai gTTS...]")
+        # Utama: Piper lokal (kalau model bahasa ini ada). Selain itu langsung gTTS.
+        if _piper_available():
+            try:
+                _piper_stream_play(bersih)
+                return
+            except KeyboardInterrupt:
+                raise
+            except Exception as e:
+                print(f"   [Piper gagal ({e}), pakai gTTS...]")
         _gtts_play(bersih)
     except KeyboardInterrupt:
         # Tekan Ctrl+C saat bicara = lewati suara, JANGAN matikan agent.
@@ -294,19 +306,25 @@ class StreamSpeaker:
 
     def __init__(self):
         self.enabled = config.VOICE_ENABLED
+        self._use_gtts = False  # mode fallback: kumpulkan teks, ucapkan via gTTS di close
+        self._text = []         # penampung teks untuk mode gTTS
+        self._buf = ""
+        self._in_code = False   # sedang di dalam blok ``` ?
+        self._fence_buf = ""    # tahan backtick yang mungkin kepotong antar-chunk
         if not self.enabled:
+            return
+        if not _piper_available():
+            # Bahasa tanpa model Piper (mis. English) -> pakai gTTS saat close().
+            self._use_gtts = True
             return
         try:
             self._voice = _get_voice()
         except Exception:
-            # Model Piper tak tersedia -> matikan speaker latar (agent tetap jalan).
+            # Model Piper gagal dimuat -> matikan speaker latar (agent tetap jalan).
             self.enabled = False
             return
         sr = self._voice.config.sample_rate
         self._player = _open_player(sr)
-        self._buf = ""
-        self._in_code = False   # sedang di dalam blok ``` ?
-        self._fence_buf = ""    # tahan backtick yang mungkin kepotong antar-chunk
         self._q: "queue.Queue[str | None]" = queue.Queue()
         self._thread = threading.Thread(target=self._worker, daemon=True)
         self._thread.start()
@@ -364,6 +382,9 @@ class StreamSpeaker:
         """Suapkan potongan teks dari stream; kalimat utuh langsung diucapkan."""
         if not self.enabled:
             return
+        if self._use_gtts:
+            self._text.append(teks)      # kumpulkan dulu; diucapkan sekali di close()
+            return
         prosa = self._buang_kode(teks)   # buang blok kode sebelum diucapkan
         if not prosa:
             return
@@ -377,6 +398,16 @@ class StreamSpeaker:
     def close(self):
         """Ucapkan sisa buffer lalu tunggu seluruh suara selesai."""
         if not self.enabled:
+            return
+        if self._use_gtts:
+            # Mode fallback: bersihkan seluruh teks lalu ucapkan sekali via gTTS.
+            full = _bersihkan_teks("".join(self._text))
+            self._text = []
+            if full:
+                try:
+                    _gtts_play(full)
+                except Exception:
+                    pass  # gagal suara tak boleh mengganggu kerja agent
             return
         if self._buf.strip():
             self._enqueue(self._buf)

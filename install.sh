@@ -12,6 +12,9 @@ INSTALL_DIR="${VOCA_HOME:-$HOME/.voca}"
 BIN_DIR="$HOME/.local/bin"
 MODEL_BASE="https://huggingface.co/rhasspy/piper-voices/resolve/main/id/id_ID/news_tts/medium"
 MODEL="id_ID-news_tts-medium"
+# Model suara English (lokal, untuk fitur ganti bahasa).
+MODEL_EN_BASE="https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium"
+MODEL_EN="en_US-amy-medium"
 
 say()  { printf '\033[1;36m%s\033[0m\n' "$*"; }
 ok()   { printf '\033[1;32m%s\033[0m\n' "$*"; }
@@ -58,10 +61,14 @@ python3 -m venv "$INSTALL_DIR/.venv"
 # ─────────────────────────────────────────────────────────────
 # 5) Model suara Piper (~60 MB)
 # ─────────────────────────────────────────────────────────────
-say "🔊 Mengunduh model suara Piper (~60MB)..."
+say "🔊 Mengunduh model suara Piper Indonesia (~60MB)..."
 mkdir -p "$INSTALL_DIR/models"
 curl -fsSL "$MODEL_BASE/$MODEL.onnx"      -o "$INSTALL_DIR/models/$MODEL.onnx"
 curl -fsSL "$MODEL_BASE/$MODEL.onnx.json" -o "$INSTALL_DIR/models/$MODEL.onnx.json"
+
+say "🔊 Mengunduh model suara Piper English (~60MB)..."
+curl -fsSL "$MODEL_EN_BASE/$MODEL_EN.onnx"      -o "$INSTALL_DIR/models/$MODEL_EN.onnx"
+curl -fsSL "$MODEL_EN_BASE/$MODEL_EN.onnx.json" -o "$INSTALL_DIR/models/$MODEL_EN.onnx.json"
 
 # ─────────────────────────────────────────────────────────────
 # 6) Siapkan .env — ATAU tanya API key jika belum ada
@@ -160,8 +167,8 @@ ok "✅ Instalasi selesai! Voca siap dipakai."
 echo ""
 echo "  Jalankan sekarang:"
 echo ""
-echo "    voca              → mode teks (ketik perintah)"
-echo "    voca --voice      → mode hands-free (ngomong ↔ Voca ngomong balik)"
+echo "    voca              → mode hands-free (default, bicara langsung)"
+echo "    voca --text       → mode teks murni (tanpa suara/STT)"
 echo ""
 echo "  Setting suara & model ada di: $ENV_FILE"
 echo ""

@@ -18,11 +18,8 @@ import time
 from pathlib import Path
 
 from . import config
-
-# Kode warna ANSI untuk tampilan diff di terminal.
-_HIJAU, _MERAH, _CYAN, _DIM, _TEBAL, _RESET = (
-    "\033[32m", "\033[31m", "\033[36m", "\033[2m", "\033[1m", "\033[0m",
-)
+from . import ui
+from .ui import console
 
 # Folder berat/tak relevan yang dilewati saat menyusuri (list & search).
 _IGNORE_DIRS = {
@@ -41,8 +38,8 @@ def _detect_workspace() -> Path:
         return Path(os.getcwd()).resolve()
     except (FileNotFoundError, OSError):
         home = Path.home()
-        print(f"Folder saat ini tidak valid (mungkin terhapus). "
-              f"Pakai {home} sebagai folder kerja. Sebaiknya 'cd' ke folder yang ada.")
+        console.print(f"[warn]Folder saat ini tidak valid (mungkin terhapus). "
+                      f"Pakai {home} sebagai folder kerja. Sebaiknya 'cd' ke folder yang ada.[/warn]")
         return home
 
 
@@ -61,15 +58,9 @@ def _resolve_safe(path: str) -> Path:
     return target
 
 
-def _keyboard_confirm(prompt: str) -> bool:
-    """Konfirmasi default: ketik y/n di keyboard."""
-    jawab = input(f"\n{_CYAN}?{_RESET} {prompt} {_DIM}[y/N]{_RESET} ").strip().lower()
-    return jawab in ("y", "yes", "ya")
-
-
 # Handler konfirmasi aktif. Bisa diganti (mis. mode suara) lewat
-# set_confirm_handler(). Default: keyboard.
-_confirm_handler = _keyboard_confirm
+# set_confirm_handler(). Default: keyboard (lewat helper ber-theme di ui).
+_confirm_handler = ui.konfirmasi_keyboard
 
 
 def set_confirm_handler(fn) -> None:
@@ -227,24 +218,24 @@ def _tampilkan_diff(path: str, lama: str, baru: str) -> tuple[int, int]:
     if not config.SHOW_DIFF:
         return tambah, hapus
     if not diff:
-        print(f"   (tidak ada perubahan isi pada '{path}')")
+        console.print(f"   [muted](tidak ada perubahan isi pada '{path}')[/muted]")
         return tambah, hapus
 
-    print(f"\n   ── Perubahan '{path}' ──")
+    console.print(f"\n   [muted]{ui.TOOL}[/muted] [accent]{path}[/accent]")
     for ln in diff[:config.DIFF_MAX_LINES]:
         if ln.startswith(("+++", "---")):
-            print(f"   {_TEBAL}{ln}{_RESET}")
+            console.print(f"   [muted]{ln}[/muted]")
         elif ln.startswith("@@"):
-            print(f"   {_CYAN}{ln}{_RESET}")
+            console.print(f"   [accent]{ln}[/accent]")
         elif ln.startswith("+"):
-            print(f"   {_HIJAU}{ln}{_RESET}")
+            console.print(f"   [success]{ln}[/success]")
         elif ln.startswith("-"):
-            print(f"   {_MERAH}{ln}{_RESET}")
+            console.print(f"   [error]{ln}[/error]")
         else:
-            print(f"   {ln}")
+            console.print(f"   {ln}")
     if len(diff) > config.DIFF_MAX_LINES:
-        print(f"   ... (diff dipotong di {config.DIFF_MAX_LINES} baris)")
-    print(f"   {_HIJAU}+{tambah}{_RESET} / {_MERAH}-{hapus}{_RESET} baris\n")
+        console.print(f"   [muted]... (diff dipotong di {config.DIFF_MAX_LINES} baris)[/muted]")
+    console.print(f"   [success]+{tambah}[/success] [muted]/[/muted] [error]-{hapus}[/error] baris\n")
     return tambah, hapus
 
 
@@ -338,7 +329,7 @@ def run_command(command: str) -> str:
     if os.name != "posix":  # streaming via select hanya andal di POSIX
         return _run_blocking(command)
 
-    print(f"{_DIM}  $ {command}{_RESET}")
+    console.print(f"[muted]  $ {command}[/muted]")
     try:
         proc = subprocess.Popen(
             command, shell=True, cwd=WORKSPACE,
@@ -362,7 +353,7 @@ def run_command(command: str) -> str:
                 line = proc.stdout.readline()
                 if line == "":
                     break  # EOF: proses selesai
-                print(f"{_DIM}  │{_RESET} {line}", end="", flush=True)
+                console.print(f"[accent]  │[/accent] {line}", end="")
                 if total < config.MAX_OUTPUT_CHARS:
                     potongan.append(line)
                     total += len(line)
@@ -370,7 +361,7 @@ def run_command(command: str) -> str:
                 break  # proses selesai, tak ada output baru
     except KeyboardInterrupt:
         proc.kill(); proc.wait()
-        print(f"\n{_DIM}  (dibatalkan dengan Ctrl+C){_RESET}")
+        console.print(f"\n[muted]  (dibatalkan dengan Ctrl+C)[/muted]")
         return "Command dibatalkan oleh user (Ctrl+C)."
     finally:
         try:

@@ -7,14 +7,16 @@ REM    curl -fsSL -o "%TEMP%\kong-install.bat" https://raw.githubusercontent.com
 REM ===========================================================================
 setlocal enabledelayedexpansion
 
-set "REPO=https://github.com/ediiloupatty/AI-AGENT.git"
-set "INSTALL_DIR=%USERPROFILE%\.kong"
+set "REPO=https://github.com/ediiloupatty/voice-coding-assistant.git"
+set "INSTALL_DIR=%USERPROFILE%\.voca"
 set "BIN_DIR=%INSTALL_DIR%\bin"
 set "MODEL_BASE=https://huggingface.co/rhasspy/piper-voices/resolve/main/id/id_ID/news_tts/medium"
 set "MODEL=id_ID-news_tts-medium"
+set "MODEL_EN_BASE=https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium"
+set "MODEL_EN=en_US-amy-medium"
 
 echo ===========================================
-echo   Memasang AI Coding Companion (kong)
+echo   Memasang Voca (voca)
 echo ===========================================
 
 REM --- 1) Prasyarat wajib ---
@@ -39,21 +41,24 @@ python -m venv "%INSTALL_DIR%\.venv"
 "%INSTALL_DIR%\.venv\Scripts\python.exe" -m pip install -q --upgrade pip
 "%INSTALL_DIR%\.venv\Scripts\python.exe" -m pip install -q -r "%INSTALL_DIR%\requirements.txt"
 
-REM --- 4) Model suara Piper ---
-echo Mengunduh model suara Piper ^(~60MB^)...
+REM --- 4) Model suara Piper (Indonesia + English) ---
+echo Mengunduh model suara Piper Indonesia ^(~60MB^)...
 if not exist "%INSTALL_DIR%\models" mkdir "%INSTALL_DIR%\models"
 curl -fsSL "%MODEL_BASE%/%MODEL%.onnx"      -o "%INSTALL_DIR%\models\%MODEL%.onnx"
 curl -fsSL "%MODEL_BASE%/%MODEL%.onnx.json" -o "%INSTALL_DIR%\models\%MODEL%.onnx.json"
+echo Mengunduh model suara Piper English ^(~60MB^)...
+curl -fsSL "%MODEL_EN_BASE%/%MODEL_EN%.onnx"      -o "%INSTALL_DIR%\models\%MODEL_EN%.onnx"
+curl -fsSL "%MODEL_EN_BASE%/%MODEL_EN%.onnx.json" -o "%INSTALL_DIR%\models\%MODEL_EN%.onnx.json"
 
 REM --- 5) Siapkan .env ---
 if not exist "%INSTALL_DIR%\.env" copy "%INSTALL_DIR%\.env.example" "%INSTALL_DIR%\.env" >nul
 
-REM --- 6) Buat perintah 'kong' ---
-echo Membuat perintah 'kong'...
+REM --- 6) Buat perintah 'voca' ---
+echo Membuat perintah 'voca'...
 if not exist "%BIN_DIR%" mkdir "%BIN_DIR%"
-> "%BIN_DIR%\kong.cmd" echo @echo off
->> "%BIN_DIR%\kong.cmd" echo set "PYTHONPATH=%INSTALL_DIR%"
->> "%BIN_DIR%\kong.cmd" echo "%INSTALL_DIR%\.venv\Scripts\python.exe" -m companion %%*
+> "%BIN_DIR%\voca.cmd" echo @echo off
+>> "%BIN_DIR%\voca.cmd" echo set "PYTHONPATH=%INSTALL_DIR%"
+>> "%BIN_DIR%\voca.cmd" echo "%INSTALL_DIR%\.venv\Scripts\python.exe" -m voca %%*
 
 REM --- 7) Tambahkan ke PATH (user, aman lewat PowerShell) ---
 powershell -NoProfile -Command "$b='%BIN_DIR%'; $p=[Environment]::GetEnvironmentVariable('PATH','User'); if ($p -notlike '*'+$b+'*') { [Environment]::SetEnvironmentVariable('PATH', $p+';'+$b, 'User') }"
@@ -65,6 +70,6 @@ echo ===========================================
 echo Langkah terakhir:
 echo   1^) Isi API key Qwen di:  %INSTALL_DIR%\.env   ^(DASHSCOPE_API_KEY=sk-xxxx^)
 echo   2^) BUKA CMD/Terminal BARU ^(biar PATH ter-refresh^)
-echo   3^) Jalankan:  kong        ^(mode teks^)
-echo              atau kong --voice ^(hands-free^)
+echo   3^) Jalankan:  voca        ^(mode hands-free^)
+echo              atau voca --text  ^(mode teks murni^)
 endlocal

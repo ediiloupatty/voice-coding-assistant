@@ -19,6 +19,8 @@ import sounddevice as sd
 from faster_whisper import WhisperModel
 
 from . import config
+from . import lang
+from . import ui
 
 SAMPLE_RATE = config.SAMPLE_RATE
 
@@ -41,7 +43,7 @@ def _get_model() -> WhisperModel:
     """Muat model Whisper sekali saja (lazy, lalu di-cache)."""
     global _model
     if _model is None:
-        print(f"   [memuat model Whisper '{config.WHISPER_MODEL}' (sekali di awal)...]")
+        ui.info(f"  memuat model Whisper '{config.WHISPER_MODEL}' (sekali di awal)…")
         _model = WhisperModel(config.WHISPER_MODEL, device="cpu", compute_type="int8")
     return _model
 
@@ -54,16 +56,20 @@ def record_until_enter() -> np.ndarray | None:
         frames.append(indata.copy())
 
     input("\nTekan ENTER untuk MULAI bicara...")
-    with sd.InputStream(samplerate=SAMPLE_RATE, channels=1,
-                        dtype="float32", callback=callback):
-        input("Merekam... tekan ENTER lagi untuk BERHENTI.")
+    try:
+        with sd.InputStream(samplerate=SAMPLE_RATE, channels=1,
+                            dtype="float32", callback=callback):
+            input("Merekam... tekan ENTER lagi untuk BERHENTI.")
+    except Exception as e:
+        ui.error(f"Perangkat audio bermasalah: {e}")
+        return None
 
     if not frames:
         return None
     return np.concatenate(frames, axis=0).flatten()
 
 
-def record_until_silence(max_seconds: float = 15.0,
+def record_until_silence(max_seconds: float = 60.0,
                          silence_threshold: float = 0.01,
                          silence_duration: float = 1.2) -> np.ndarray | None:
     """Rekam otomatis: mulai saat ada suara, berhenti setelah hening sejenak.
@@ -76,17 +82,21 @@ def record_until_silence(max_seconds: float = 15.0,
     started = False
     silent_count = 0
 
-    with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32") as stream:
-        for _ in range(int(max_seconds / chunk_dur)):
-            data, _overflow = stream.read(chunk_frames)
-            frames.append(data.copy())
-            if float(np.abs(data).mean()) > silence_threshold:
-                started = True
-                silent_count = 0
-            elif started:
-                silent_count += 1
-                if silent_count * chunk_dur >= silence_duration:
-                    break  # sudah diam cukup lama -> selesai
+    try:
+        with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32") as stream:
+            for _ in range(int(max_seconds / chunk_dur)):
+                data, _overflow = stream.read(chunk_frames)
+                frames.append(data.copy())
+                if float(np.abs(data).mean()) > silence_threshold:
+                    started = True
+                    silent_count = 0
+                elif started:
+                    silent_count += 1
+                    if silent_count * chunk_dur >= silence_duration:
+                        break  # sudah diam cukup lama -> selesai
+    except Exception as e:
+        ui.error(f"Perangkat audio bermasalah: {e}")
+        return None
 
     if not started:
         return None
@@ -107,7 +117,7 @@ def _is_halusinasi(teks: str) -> bool:
     return bersih in _HALUSINASI
 
 
-def _rekam_atau_ketik(max_seconds: float = 15.0,
+def _rekam_atau_ketik(max_seconds: float = 60.0,
                       silence_threshold: float = 0.01,
                       silence_duration: float = 1.2):
     """Rekam mic sampai hening, TAPI kalau user menekan ENTER -> beralih ketik.
@@ -124,19 +134,26 @@ def _rekam_atau_ketik(max_seconds: float = 15.0,
     silent_count = 0
     bisa_keyboard = os.name == "posix"  # select(stdin) andal di POSIX saja
 
-    with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32") as stream:
-        for _ in range(int(max_seconds / chunk_dur)):
-            if bisa_keyboard and select.select([sys.stdin], [], [], 0)[0]:
-                return ("ketik", sys.stdin.readline().strip())
-            data, _overflow = stream.read(chunk_frames)
-            frames.append(data.copy())
-            if float(np.abs(data).mean()) > silence_threshold:
-                started = True
-                silent_count = 0
-            elif started:
-                silent_count += 1
-                if silent_count * chunk_dur >= silence_duration:
-                    break
+    try:
+        with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32") as stream:
+            for _ in range(int(max_seconds / chunk_dur)):
+                if bisa_keyboard and select.select([sys.stdin], [], [], 0)[0]:
+                    return ("ketik", sys.stdin.readline().strip())
+                data, _overflow = stream.read(chunk_frames)
+                frames.append(data.copy())
+                if float(np.abs(data).mean()) > silence_threshold:
+                    started = True
+                    silent_count = 0
+                elif started:
+                    silent_count += 1
+                    if silent_count * chunk_dur >= silence_duration:
+                        break
+    except Exception as e:
+        ui.error(f"Perangkat audio bermasalah: {e}")
+        if bisa_keyboard:
+            ui.info("  beralih ke mode ketik — silakan ketik perintah di bawah")
+            return ("ketik", sys.stdin.readline().strip())
+        return ("kosong", None)
 
     if not started:
         return ("kosong", None)
@@ -155,7 +172,7 @@ def listen_auto_atau_ketik():
         return "ketik", (data or "")
     if jenis == "kosong":
         return "suara", ""
-    print("   [mentranskripsi...]")
+    ui.info("  mentranskripsi…")
     return "suara", transcribe(data)
 
 
@@ -169,7 +186,7 @@ def transcribe(audio) -> str:
     # Lapis 2: VAD bawaan + cegah halusinasi berulang.
     segments, _info = model.transcribe(
         audio,
-        language=config.WHISPER_LANG,
+        language=lang.whisper(),
         beam_size=5,
         vad_filter=True,
         condition_on_previous_text=False,
@@ -191,7 +208,7 @@ def listen() -> str:
     audio = record_until_enter()
     if audio is None or len(audio) == 0:
         return ""
-    print("   [mentranskripsi...]")
+    ui.info("  mentranskripsi…")
     return transcribe(audio)
 
 
@@ -200,7 +217,7 @@ def listen_auto() -> str:
     audio = record_until_silence()
     if audio is None or len(audio) == 0:
         return ""
-    print("   [mentranskripsi...]")
+    ui.info("  mentranskripsi…")
     return transcribe(audio)
 
 

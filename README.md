@@ -126,12 +126,12 @@ curl -L "$BASE/id_ID-news_tts-medium.onnx.json" -o models/id_ID-news_tts-medium.
 ## ▶️ Menjalankan
 
 ```bash
-voca                 # mode teks  — folder saat ini jadi area kerja
-voca --voice         # mode hands-free penuh — ngomong → kerja → lapor suara
+voca                 # mode hands-free penuh — ngomong → kerja → lapor suara
+voca --text          # mode teks murni — folder saat ini jadi area kerja
 
 # tanpa perintah global 'voca':
 python -m voca
-python -m voca --voice
+python -m voca --text
 ```
 
 > [!IMPORTANT]
@@ -145,7 +145,7 @@ python -m voca --voice
 > *"Cari di mana fungsi login didefinisikan, lalu perbaiki bug-nya."*
 > *"Jalankan test-nya lalu laporkan hasilnya."*
 
-**Mode hands-free** (`voca --voice`): bicara langsung (rekam berhenti otomatis
+**Mode hands-free** (default, `voca`): bicara langsung (rekam berhenti otomatis
 saat kamu diam), konfirmasi aksi dijawab "ya"/"tidak" pakai suara, ucapkan
 "berhenti"/"stop" atau tekan `Ctrl+C` untuk keluar. **Tetap bisa mengetik kapan
 saja** — cukup tekan `ENTER` lalu ketik perintahmu, tanpa keluar dari mode suara.
@@ -226,7 +226,7 @@ Saat `voca` dijalankan di folder yang punya sesi tersimpan, ia menawarkan untuk
 
 ```bash
 VOICE_PITCH=1.15 VOICE_SPEED=1.18 VOICE_VOLUME=0.82 voca
-QWEN_TEMPERATURE=0.1 MAX_TOOL_ITERS=25 voca --voice
+QWEN_TEMPERATURE=0.1 MAX_TOOL_ITERS=25 voca --text
 ```
 
 ---
@@ -236,7 +236,7 @@ QWEN_TEMPERATURE=0.1 MAX_TOOL_ITERS=25 voca --voice
 ```
 voice-coding-assistant/
 ├── voca/                 # paket utama
-│   ├── __main__.py       # entry: python -m voca [--voice]
+│   ├── __main__.py       # entry: python -m voca [--text]
 │   ├── config.py         # SEMUA setting & path terpusat di sini
 │   ├── agent.py          # otak: loop LLM + tool use + history + sesi + UI
 │   ├── tools.py          # tangan: list/search/read/edit/write, run command, diff

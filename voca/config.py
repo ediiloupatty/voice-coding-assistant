@@ -48,9 +48,15 @@ CHARS_PER_TOKEN = float(os.getenv("CHARS_PER_TOKEN", "3.5"))   # heuristik estim
 SESSION_ENABLED = os.getenv("SESSION_ENABLED", "1") != "0"     # 0 = jangan simpan sesi
 SESSION_FILE = os.getenv("SESSION_FILE", ".voca/session.json")  # relatif ke folder kerja
 
+# --- Bahasa aktif (Indonesia/English, bisa diganti saat jalan) -------------
+VOCA_LANG = os.getenv("VOCA_LANG", "id")                 # bahasa default: 'id' / 'en'
+
 # --- Suara keluar: TTS Piper (lokal/offline) -------------------------------
 VOICE_ENABLED = os.getenv("VOICE_ENABLED", "1") != "0"
 PIPER_MODEL = os.getenv("PIPER_MODEL", str(MODELS_DIR / "id_ID-news_tts-medium.onnx"))
+# Model Piper English opsional. Kalau filenya ada -> suara English lokal & streaming;
+# kalau tidak -> otomatis pakai gTTS (online) untuk suara English.
+PIPER_MODEL_EN = os.getenv("PIPER_MODEL_EN", str(MODELS_DIR / "en_US-amy-medium.onnx"))
 VOICE_PITCH = float(os.getenv("VOICE_PITCH", "1.1"))     # nada: >1 lebih tinggi
 VOICE_SPEED = float(os.getenv("VOICE_SPEED", "1.12"))    # tempo: >1 lebih pelan
 VOICE_VOLUME = float(os.getenv("VOICE_VOLUME", "0.9"))   # 0..1: kecil = lembut
