@@ -1,0 +1,65 @@
+name: release
+
+# Build binary Voca (Rust) untuk 3 OS saat ada tag versi (mis. v0.1.0),
+# lalu lampirkan ke GitHub Release. install.sh / install.ps1 mengunduh dari sini.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: # boleh dijalankan manual dari tab Actions
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build ${{ matrix.asset }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            bin: voca
+            asset: voca-linux-x64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            bin: voca
+            asset: voca-macos-arm64
+          - os: macos-13
+            target: x86_64-apple-darwin
+            bin: voca
+            asset: voca-macos-x64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bin: voca.exe
+            asset: voca-windows-x64.exe
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pasang Rust + target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: Build (release)
+        working-directory: rust
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Siapkan artefak (rename ke nama rilis)
+        shell: bash
+        run: |
+          src="rust/target/${{ matrix.target }}/release/${{ matrix.bin }}"
+          cp "$src" "${{ matrix.asset }}"
+
+      - name: Lampirkan ke Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.asset }}
+          # Saat workflow_dispatch (tanpa tag), pakai tag 'nightly' biar tetap bisa diuji.
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || 'nightly' }}

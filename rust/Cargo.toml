@@ -1,0 +1,30 @@
+[package]
+name = "voca"
+version = "0.1.0"
+edition = "2021"
+description = "Voca — voice/code assistant CLI (port Rust dari versi Python)"
+
+[[bin]]
+name = "voca"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "io-util"] }
+# rustls-tls (bukan OpenSSL) → binary statis & cross-compile mulus.
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+futures-util = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dotenvy = "0.15"
+dirs = "5"
+rustyline = "14"
+anyhow = "1"
+
+# Suara ditangani oleh sidecar Python (voca.voice_server) — lihat voicebridge.rs.
+# Sengaja TIDAK ada dependency ML/audio native di Rust agar build tetap ramping
+# & cross-compile mudah.
+
+[profile.release]
+opt-level = "z"   # kecilkan ukuran binary
+lto = true
+strip = true

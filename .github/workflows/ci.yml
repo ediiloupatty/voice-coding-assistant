@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # Produk utama: core Rust (chat + tool-calling + installer).
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - name: Build
+        working-directory: rust
+        run: cargo build --verbose
+      - name: Test
+        working-directory: rust
+        run: cargo test --verbose
+
+  # Sidecar suara Python (voice/listen helpers — tanpa audio/model).
+  voice-sidecar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependensi tes (ringan)
+        run: |
+          python -m pip install --upgrade pip
+          pip install python-dotenv pytest
+      - name: Jalankan pytest (test audio di-skip otomatis)
+        run: pytest -q

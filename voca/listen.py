@@ -171,22 +171,6 @@ def _rekam_atau_ketik(max_seconds: float = 60.0,
     return ("suara", np.concatenate(frames, axis=0).flatten())
 
 
-def listen_auto_atau_ketik():
-    """Hands-free + ketik: ngomong, ATAU tekan ENTER untuk mengetik perintah.
-
-    Return (jenis, teks) dengan jenis 'suara' atau 'ketik'. Untuk 'ketik',
-    teks bisa kosong (artinya user cuma menekan ENTER) — pemanggil yang
-    menampilkan prompt ketiknya (mis. kotak input ala Claude).
-    """
-    jenis, data = _rekam_atau_ketik()
-    if jenis == "ketik":
-        return "ketik", (data or "")
-    if jenis == "kosong":
-        return "suara", ""
-    ui.info("  mentranskripsi…")
-    return "suara", transcribe(data)
-
-
 def transcribe(audio) -> str:
     """Ubah audio jadi teks. VAD + filter halusinasi agar hening tak jadi teks."""
     # Lapis 1: audio terlalu pelan -> anggap tak ada ucapan (skip Whisper).
