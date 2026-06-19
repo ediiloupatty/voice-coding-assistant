@@ -195,9 +195,15 @@ pub fn select_menu(title: &str, items: &[String], current: usize) -> Option<usiz
         return None;
     }
     let mut idx = current.min(n - 1);
-    println!(); // ruang sebelum menu
+    let height = n + 2; // judul + item + hint
+    // Sediakan ruang: dorong konten ke atas (newline menggulir di batas bawah
+    // scroll-region), lalu naik ke baris judul. Tanpa ini, baris menu numpuk.
+    for _ in 0..height {
+        println!();
+    }
+    let up = height - 1; // dari baris hint kembali ke baris judul
+    print!("\x1b[{up}F");
     render_menu(title, items, idx);
-    let up = n + 1; // dari baris hint kembali ke baris judul
 
     let _ = enable_raw_mode();
     let chosen = loop {
@@ -223,7 +229,7 @@ pub fn select_menu(title: &str, items: &[String], current: usize) -> Option<usiz
         }
     };
     let _ = disable_raw_mode();
-    print!("\x1b[1E"); // turun ke baris bersih di bawah menu
+    println!(); // baris bersih di bawah menu
     io::stdout().flush().ok();
     chosen
 }
