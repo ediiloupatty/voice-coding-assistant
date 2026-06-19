@@ -34,7 +34,7 @@ impl VoiceBridge {
         }
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit()); // status UI Python → terminal
+            .stderr(Stdio::null()); // bungkam output sidecar agar tak mengotori bar TUI
 
         let mut child = match cmd.spawn() {
             Ok(c) => c,

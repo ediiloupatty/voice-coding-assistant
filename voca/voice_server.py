@@ -41,11 +41,18 @@ def _send(obj) -> None:
 
 
 def main() -> None:
-    # Hangatkan model TTS supaya ucapan pertama tak terasa lambat.
+    # Hangatkan SEMUA model di awal supaya user langsung bisa bicara tanpa jeda:
+    # TTS (piper) + STT (whisper). Status tampil di terminal (stderr).
+    print("  memuat model suara (TTS + STT), sebentar…", file=sys.stderr, flush=True)
     try:
-        voice.warmup()
+        voice.warmup()        # Piper (TTS)
     except Exception:
         pass
+    try:
+        listen._get_model()   # Whisper (STT) — preload, tak lagi lazy
+    except Exception:
+        pass
+    print("  \033[32m✓ model suara siap.\033[0m", file=sys.stderr, flush=True)
     _send({"ready": True})
 
     while True:

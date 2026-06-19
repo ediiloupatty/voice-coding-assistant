@@ -86,4 +86,24 @@ SPEAK_PHONETIC = os.getenv("SPEAK_PHONETIC", "1") != "0"  # eja kata Inggris umu
 # --- Suara masuk: STT Whisper (lokal/offline) ------------------------------
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small")      # tiny..large-v3
 SAMPLE_RATE = 16000                                      # Whisper butuh 16 kHz mono
-MIN_SPEECH_RMS = float(os.getenv("MIN_SPEECH_RMS", "0.001"))  # energi min dianggap ada ucapan (anti-halusinasi)
+
+# --- Sensitivitas suara masuk (anti-"mimpi"/halusinasi saat noise kecil) ---
+# MIN_SPEECH_RMS: ambang energi dianggap "ada suara". TERLALU kecil = noise
+#   ikut terekam → Whisper mengarang. TERLALU besar = ucapan pelan tak terdeteksi.
+#   Cara tuning: kalau noise sering jadi teks → naikkan; kalau suaramu tak
+#   terdeteksi → turunkan. Rentang wajar 0.005–0.03.
+MIN_SPEECH_RMS = float(os.getenv("MIN_SPEECH_RMS", "0.012"))
+# Chunk bersuara berturut-turut (0.1s/chunk) sebelum dianggap MULAI bicara —
+# mencegah satu spike noise memicu rekaman.
+SPEECH_START_CHUNKS = int(os.getenv("SPEECH_START_CHUNKS", "2"))
+# Durasi suara minimum (detik) agar rekaman diterima — buang blip/ketukan.
+MIN_SPEECH_SECONDS = float(os.getenv("MIN_SPEECH_SECONDS", "0.4"))
+# Hening (detik) untuk berhenti merekam otomatis. Lebih kecil = lebih responsif
+# (tapi jangan terlalu kecil, nanti kepotong saat kamu jeda berpikir).
+SILENCE_DURATION = float(os.getenv("SILENCE_DURATION", "0.7"))
+# beam_size Whisper: 1 = greedy (PALING CEPAT, akurasi sedikit turun),
+# 5 = paling akurat tapi lambat di CPU. Untuk perintah pendek, 1 biasanya cukup.
+WHISPER_BEAM_SIZE = int(os.getenv("WHISPER_BEAM_SIZE", "1"))
+# Ambang Whisper untuk membuang segmen "bukan ucapan" / keyakinan rendah.
+NO_SPEECH_THRESHOLD = float(os.getenv("NO_SPEECH_THRESHOLD", "0.6"))
+LOGPROB_THRESHOLD = float(os.getenv("LOGPROB_THRESHOLD", "-1.0"))

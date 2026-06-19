@@ -4,12 +4,10 @@
 //! membengkak (port sederhana dari _pangkas_history di voca/agent.py).
 
 use anyhow::Result;
-use rustyline::error::ReadlineError;
-use rustyline::DefaultEditor;
 
-use crate::config::Limits;
+use crate::config::{self, Limits};
 use crate::llm::{self, Message};
-use crate::provider::Provider;
+use crate::provider::{self, Provider};
 use crate::voicebridge::VoiceBridge;
 use crate::{tools, ui};
 
@@ -42,19 +40,22 @@ pub struct VoiceOpts {
 /// Jalankan REPL sampai user keluar (mode teks &/ suara).
 pub async fn run(
     client: reqwest::Client,
-    provider: Provider,
+    mut provider: Provider,
     limits: Limits,
-    voice: VoiceOpts,
+    mut voice: VoiceOpts,
+    w: usize,
+    h: usize,
 ) -> Result<()> {
-    let mut rl = DefaultEditor::new()?;
     let mut messages: Vec<Message> = vec![Message::new("system", SYSTEM_PROMPT)];
     let tools_schema = tools::tools_schema();
 
     // Sidecar suara Python (hanya kalau mode suara diminta).
     let mut bridge: Option<VoiceBridge> = if voice.speak || voice.listen {
+        ui::info("menyiapkan suara (memuat model)…");
         let b = VoiceBridge::start();
-        if b.is_none() {
-            ui::warn("mode suara dimatikan — lanjut sebagai teks.");
+        match &b {
+            Some(_) => ui::info("✓ siap — silakan bicara."),
+            None => ui::warn("mode suara dimatikan — lanjut sebagai teks."),
         }
         b
     } else {
@@ -64,25 +65,23 @@ pub async fn run(
     let voice_speak = voice.speak && bridge.is_some();
 
     loop {
-        // Ambil input: dari mic (mode dengar) atau ketik.
+        // Ambil input: dari mic (mode dengar) atau ketik — bar ter-pin di bawah.
         let teks: String = if voice_listen {
-            ui::info("dengar… (bicara, berhenti otomatis saat hening)");
+            ui::draw_bar(w, h, "● SUARA", "bicara · ucap 'openai'/'english' utk ganti · /exit", &voice.lang);
+            ui::park_in_bar(h); // kursor "terkunci" di kotak input saat menunggu suara
             let t = bridge.as_mut().unwrap().listen(&voice.lang);
             if t.is_empty() {
-                ui::info("(tidak terdengar — coba lagi)");
                 continue;
             }
-            println!("  {t}");
+            ui::to_scroll(h); // pindah ke area gulir untuk mencetak echo + jawaban
+            ui::user_echo(&t);
             t
         } else {
-            match rl.readline(&ui::input_prompt()) {
-                Ok(l) => l.trim().to_string(),
-                Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => {
-                    ui::info("sampai jumpa.");
-                    break;
-                }
-                Err(e) => {
-                    ui::error(&format!("input error: {e}"));
+            ui::draw_bar(w, h, "⌨ KETIK", "/model · /lan · /exit", &voice.lang);
+            match ui::read_line_bar(w, h) {
+                Some(l) => l,
+                None => {
+                    ui::bye("sampai jumpa");
                     break;
                 }
             }
@@ -91,12 +90,31 @@ pub async fn run(
         if teks.is_empty() {
             continue;
         }
+        // --- Perintah slash (tidak dikirim ke LLM) ---------------------------
         if teks == "/exit" || teks == "/quit" {
-            ui::info("sampai jumpa.");
+            ui::bye("sampai jumpa");
             break;
         }
-        if !voice_listen {
-            let _ = rl.add_history_entry(&teks);
+        if teks == "/help" {
+            ui::info("perintah: /model [nama] · /lan [id|en] · /exit");
+            continue;
+        }
+        if let Some(rest) = teks.strip_prefix("/model") {
+            switch_model(rest.trim(), &mut provider);
+            continue;
+        }
+        if let Some(rest) = teks.strip_prefix("/lan") {
+            // terima /lan maupun /lang
+            switch_lang(rest.trim_start_matches('g').trim(), &mut voice);
+            continue;
+        }
+        // Perintah singkat lewat SUARA (ucapkan "openai", "english", dll).
+        if let Some((kind, val)) = detect_quick_command(&teks) {
+            match kind {
+                "model" => switch_model(val, &mut provider),
+                _ => switch_lang(val, &mut voice),
+            }
+            continue;
         }
 
         messages.push(Message::new("user", &teks));
@@ -111,6 +129,69 @@ pub async fn run(
         trim_history(&mut messages, limits.max_history);
     }
     Ok(())
+}
+
+/// `/model [kode]` — tampilkan daftar provider, atau pindah ke salah satunya.
+fn switch_model(arg: &str, provider: &mut Provider) {
+    if arg.is_empty() {
+        ui::info("provider tersedia:");
+        for p in provider::all() {
+            let aktif = if p.code == provider.code { "  (aktif)" } else { "" };
+            let key = if p.api_key.is_some() { "●" } else { "○" };
+            ui::info(&format!("  {key} {:<11} {}{aktif}", p.code, p.model));
+        }
+        ui::info("pakai: /model <qwen|openai|openrouter|deepseek>");
+        return;
+    }
+    match provider::by_code(arg) {
+        Some(mut p) => match config::ensure_api_key(p.code, p.name) {
+            Ok(k) => {
+                p.api_key = Some(k);
+                ui::info(&format!("✓ pindah ke {} ({})", p.name, p.model));
+                *provider = p;
+            }
+            Err(e) => ui::error(&format!("{e}")),
+        },
+        None => ui::error("provider tak dikenal (qwen/openai/openrouter/deepseek)"),
+    }
+}
+
+/// Deteksi perintah singkat (≤3 kata) dari ucapan/ketikan: ganti model/bahasa.
+/// Hanya memicu kalau SELURUH teks cocok, agar tak salah picu di tengah kalimat.
+fn detect_quick_command(teks: &str) -> Option<(&'static str, &'static str)> {
+    let t: String = teks
+        .to_lowercase()
+        .chars()
+        .filter(|c| c.is_alphanumeric() || c.is_whitespace())
+        .collect();
+    let t = t.trim();
+    if t.is_empty() || t.split_whitespace().count() > 3 {
+        return None;
+    }
+    match t {
+        // Tampilkan daftar model (arg kosong → switch_model menampilkan list).
+        "model" | "ganti model" | "pilih model" | "list model" | "models" => {
+            Some(("model", ""))
+        }
+        "qwen" | "kuen" | "kwen" => Some(("model", "qwen")),
+        "openai" | "open ai" | "gpt" | "chatgpt" => Some(("model", "openai")),
+        "openrouter" | "open router" | "router" => Some(("model", "openrouter")),
+        "deepseek" | "deep seek" | "dipsik" => Some(("model", "deepseek")),
+        "bahasa" | "ganti bahasa" | "language" => Some(("lan", "")), // toggle id/en
+        "english" | "bahasa inggris" | "inggris" => Some(("lan", "en")),
+        "indonesia" | "bahasa indonesia" => Some(("lan", "id")),
+        _ => None,
+    }
+}
+
+/// `/lan [id|en]` — set bahasa suara; tanpa argumen = toggle.
+fn switch_lang(arg: &str, voice: &mut VoiceOpts) {
+    let new = match arg {
+        "id" | "en" => arg.to_string(),
+        _ => if voice.lang == "id" { "en".to_string() } else { "id".to_string() },
+    };
+    ui::info(&format!("bahasa: {}", new.to_uppercase()));
+    voice.lang = new;
 }
 
 /// Satu giliran: panggil model, eksekusi tool yang diminta, ulangi sampai

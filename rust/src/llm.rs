@@ -176,7 +176,7 @@ async fn try_stream(
             if let Some(piece) = choice.delta.content {
                 if !piece.is_empty() {
                     if !printed {
-                        ui::assistant_prefix();
+                        ui::assistant_header();
                         printed = true;
                     }
                     print!("{piece}");

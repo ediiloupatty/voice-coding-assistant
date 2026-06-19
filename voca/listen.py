@@ -76,19 +76,25 @@ def record_until_enter() -> np.ndarray | None:
 
 def record_until_silence(max_seconds: float = 60.0,
                          silence_threshold: float | None = None,
-                         silence_duration: float = 1.2) -> np.ndarray | None:
+                         silence_duration: float | None = None) -> np.ndarray | None:
     """Rekam otomatis: mulai saat ada suara, berhenti setelah hening sejenak.
 
-    Tanpa perlu menekan ENTER — untuk mode hands-free.
+    Tanpa perlu menekan ENTER — untuk mode hands-free. Pakai debounce mulai
+    (butuh beberapa chunk bersuara berturut-turut) + durasi minimum agar noise
+    kecil/blip tak memicu rekaman.
     """
     if silence_threshold is None:
         silence_threshold = config.MIN_SPEECH_RMS
+    if silence_duration is None:
+        silence_duration = config.SILENCE_DURATION
 
     chunk_dur = 0.1
     chunk_frames = int(SAMPLE_RATE * chunk_dur)
     frames = []
     started = False
     silent_count = 0
+    voiced_run = 0     # chunk bersuara berturut-turut (debounce mulai)
+    voiced_total = 0   # total chunk bersuara (durasi minimum)
 
     try:
         with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32") as stream:
@@ -96,17 +102,23 @@ def record_until_silence(max_seconds: float = 60.0,
                 data, _overflow = stream.read(chunk_frames)
                 frames.append(data.copy())
                 if float(np.abs(data).mean()) > silence_threshold:
-                    started = True
+                    voiced_run += 1
+                    voiced_total += 1
+                    if voiced_run >= config.SPEECH_START_CHUNKS:
+                        started = True
                     silent_count = 0
-                elif started:
-                    silent_count += 1
-                    if silent_count * chunk_dur >= silence_duration:
-                        break  # sudah diam cukup lama -> selesai
+                else:
+                    voiced_run = 0
+                    if started:
+                        silent_count += 1
+                        if silent_count * chunk_dur >= silence_duration:
+                            break  # sudah diam cukup lama -> selesai
     except Exception as e:
         ui.error(f"Perangkat audio bermasalah: {e}")
         return None
 
-    if not started:
+    # Buang kalau tak pernah mulai, atau total suara terlalu pendek (noise/blip).
+    if not started or voiced_total * chunk_dur < config.MIN_SPEECH_SECONDS:
         return None
     return np.concatenate(frames, axis=0).flatten()
 
@@ -127,7 +139,7 @@ def _is_halusinasi(teks: str) -> bool:
 
 def _rekam_atau_ketik(max_seconds: float = 60.0,
                       silence_threshold: float | None = None,
-                      silence_duration: float = 1.2):
+                      silence_duration: float | None = None):
     """Rekam mic sampai hening, TAPI kalau user menekan ENTER -> beralih ketik.
 
     Return salah satu:
@@ -137,12 +149,16 @@ def _rekam_atau_ketik(max_seconds: float = 60.0,
     """
     if silence_threshold is None:
         silence_threshold = config.MIN_SPEECH_RMS
+    if silence_duration is None:
+        silence_duration = config.SILENCE_DURATION
 
     chunk_dur = 0.1
     chunk_frames = int(SAMPLE_RATE * chunk_dur)
     frames = []
     started = False
     silent_count = 0
+    voiced_run = 0
+    voiced_total = 0
     bisa_keyboard = os.name == "posix"  # select(stdin) andal di POSIX saja
 
     try:
@@ -153,12 +169,17 @@ def _rekam_atau_ketik(max_seconds: float = 60.0,
                 data, _overflow = stream.read(chunk_frames)
                 frames.append(data.copy())
                 if float(np.abs(data).mean()) > silence_threshold:
-                    started = True
+                    voiced_run += 1
+                    voiced_total += 1
+                    if voiced_run >= config.SPEECH_START_CHUNKS:
+                        started = True
                     silent_count = 0
-                elif started:
-                    silent_count += 1
-                    if silent_count * chunk_dur >= silence_duration:
-                        break
+                else:
+                    voiced_run = 0
+                    if started:
+                        silent_count += 1
+                        if silent_count * chunk_dur >= silence_duration:
+                            break
     except Exception as e:
         ui.error(f"Perangkat audio bermasalah: {e}")
         if bisa_keyboard:
@@ -166,7 +187,7 @@ def _rekam_atau_ketik(max_seconds: float = 60.0,
             return ("ketik", sys.stdin.readline().strip())
         return ("kosong", None)
 
-    if not started:
+    if not started or voiced_total * chunk_dur < config.MIN_SPEECH_SECONDS:
         return ("kosong", None)
     return ("suara", np.concatenate(frames, axis=0).flatten())
 
@@ -178,18 +199,23 @@ def transcribe(audio) -> str:
         return ""
 
     model = _get_model()
-    # Lapis 2: VAD bawaan + cegah halusinasi berulang.
+    # Lapis 2: VAD bawaan + ambang keyakinan agar noise/hening tak jadi teks.
     segments, _info = model.transcribe(
         audio,
         language=lang.whisper(),
-        beam_size=5,
+        beam_size=config.WHISPER_BEAM_SIZE,
         vad_filter=True,
-        condition_on_previous_text=False,
-        no_speech_threshold=0.6,
+        vad_parameters=dict(min_silence_duration_ms=500),
+        condition_on_previous_text=False,   # cegah halusinasi berulang
+        no_speech_threshold=config.NO_SPEECH_THRESHOLD,
+        log_prob_threshold=config.LOGPROB_THRESHOLD,
+        compression_ratio_threshold=2.4,    # buang keluaran berulang-ulang
     )
+    # Saring per-segmen: buang yang kemungkinan "bukan ucapan" atau keyakinan rendah.
     teks = " ".join(
         seg.text for seg in segments
-        if getattr(seg, "no_speech_prob", 0.0) < 0.6
+        if getattr(seg, "no_speech_prob", 0.0) < config.NO_SPEECH_THRESHOLD
+        and getattr(seg, "avg_logprob", 0.0) > config.LOGPROB_THRESHOLD
     ).strip()
 
     # Lapis 3: jaring pengaman frasa halusinasi khas.
