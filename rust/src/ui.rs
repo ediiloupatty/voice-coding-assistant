@@ -128,10 +128,14 @@ fn size() -> (usize, usize) {
         .unwrap_or((80, 24))
 }
 
-/// Masuk mode TUI: sisakan 3 baris bawah utk bar, sisanya area gulir. (w,h).
+/// Masuk mode TUI: alternate screen (bar pinned, tak tergeser saat scroll) +
+/// scroll-region untuk output. Return (w,h).
 pub fn tui_enter() -> (usize, usize) {
     let (w, h) = size();
     let bottom = h.saturating_sub(3).max(1);
+    // ?1049h: alternate screen (tanpa scrollback → bar tetap di bawah).
+    // ?1007l: matikan alternate-scroll (scroll mouse tak jadi tombol panah).
+    print!("\x1b[?1049h\x1b[?1007l");
     print!("\x1b[2J\x1b[H"); // bersihkan layar
     print!("\x1b[1;{bottom}r"); // scroll-region = baris 1..h-3
     print!("\x1b[H"); // kursor ke atas (dalam region)
@@ -139,9 +143,9 @@ pub fn tui_enter() -> (usize, usize) {
     (w, h)
 }
 
-/// Keluar mode TUI: reset scroll-region, tampilkan kursor, kembali ke bawah.
-pub fn tui_leave(h: usize) {
-    print!("{RESET}\x1b[?25h\x1b[r\x1b[{h};1H\r\n");
+/// Keluar mode TUI: reset scroll-region & kembalikan layar terminal semula.
+pub fn tui_leave(_h: usize) {
+    print!("{RESET}\x1b[?25h\x1b[r\x1b[?1007h\x1b[?1049l");
     io::stdout().flush().ok();
 }
 
