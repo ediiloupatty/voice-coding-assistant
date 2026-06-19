@@ -73,8 +73,7 @@ pub async fn run(
             if t.is_empty() {
                 continue;
             }
-            ui::to_scroll(h); // pindah ke area gulir untuk mencetak echo + jawaban
-            ui::user_echo(&t);
+            ui::to_scroll(h); // pindah ke area gulir (kursor disembunyikan)
             t
         } else {
             ui::draw_bar(w, h, "⌨ KETIK", "/model · /lan · /exit", &voice.lang);
@@ -117,6 +116,8 @@ pub async fn run(
             continue;
         }
 
+        // Pesan biasa → echo apa yang diketik/diucapkan ke atas (bar abu-abu).
+        ui::user_echo(&teks);
         messages.push(Message::new("user", &teks));
         match handle_turn(&client, &provider, &limits, &tools_schema, &mut messages).await {
             Ok(narasi) => {

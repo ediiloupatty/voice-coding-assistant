@@ -148,9 +148,9 @@ pub fn tui_enter() -> (usize, usize) {
     (w, h)
 }
 
-/// Keluar mode TUI: reset scroll-region & kembalikan kursor ke bawah.
+/// Keluar mode TUI: reset scroll-region, tampilkan kursor, kembali ke bawah.
 pub fn tui_leave(h: usize) {
-    print!("{RESET}\x1b[r\x1b[{h};1H\r\n");
+    print!("{RESET}\x1b[?25h\x1b[r\x1b[{h};1H\r\n");
     io::stdout().flush().ok();
 }
 
@@ -235,39 +235,69 @@ pub fn select_menu(title: &str, items: &[String], current: usize) -> Option<usiz
     chosen
 }
 
-/// Taruh kursor di kotak input (terlihat "terkunci" di bar) — saat menunggu.
+/// Taruh kursor di kotak input & TAMPILKAN — saat menunggu (mode suara).
 pub fn park_in_bar(h: usize) {
     let inp = h.saturating_sub(1).max(1);
-    print!("\x1b[{inp};4H{BG_INPUT}{FG_INPUT}");
+    print!("\x1b[?25h\x1b[{inp};4H{BG_INPUT}{FG_INPUT}");
     io::stdout().flush().ok();
 }
 
-/// Taruh kursor di dasar area gulir (untuk mencetak output di atas bar).
+/// Taruh kursor di dasar area gulir & SEMBUNYIKAN — saat mencetak output.
+/// Dengan kursor tersembunyi, output tak menampilkan kursor yang "melompat".
 pub fn to_scroll(h: usize) {
     let park = h.saturating_sub(3).max(1);
-    print!("{RESET}\x1b[{park};1H");
+    print!("{RESET}\x1b[?25l\x1b[{park};1H");
     io::stdout().flush().ok();
 }
 
-/// Baca satu baris di baris input bawah (h-1). None saat EOF.
-/// Setelah Enter, kursor diparkir di dasar area gulir agar output menggulir.
+/// Gambar isi baris input (kotak abu-abu + teks + kursor setelah teks).
+fn draw_input_row(row: usize, w: usize, buf: &str) {
+    print!("\x1b[{row};1H\x1b[2K{BG_INPUT}{FG_INPUT}{}", " ".repeat(w));
+    print!("\x1b[{row};1H{BG_INPUT}{BOLD}{ACCENT} {PROMPT} {NOBOLD}{FG_INPUT}{buf}");
+    let col = 4 + buf.chars().count();
+    print!("\x1b[{row};{col}H");
+    io::stdout().flush().ok();
+}
+
+/// Baca baris di kotak input bawah dengan RAW-mode line editor: kursor tetap
+/// terkunci di kotak (tak melompat), Enter tak memicu newline liar. None saat
+/// Ctrl+C / Ctrl+D di input kosong. Setelah selesai, kursor disembunyikan &
+/// diparkir di area gulir agar output menggulir mulus di atas bar.
 pub fn read_line_bar(w: usize, h: usize) -> Option<String> {
     let inp = h.saturating_sub(1).max(1);
-    print!("\x1b[{inp};1H\x1b[2K{BG_INPUT}{FG_INPUT}{}", " ".repeat(w));
-    print!("\x1b[{inp};1H{BG_INPUT}{BOLD}{ACCENT} {PROMPT} {NOBOLD}{FG_INPUT}");
-    io::stdout().flush().ok();
+    let mut buf = String::new();
 
-    let mut line = String::new();
-    let n = io::stdin().read_line(&mut line).unwrap_or(0);
-    print!("{RESET}");
-    // Parkir kursor di dasar area gulir (h-3) → output berikutnya scroll di atas bar.
+    let _ = enable_raw_mode();
+    print!("\x1b[?25h"); // kursor terlihat di kotak input
+    draw_input_row(inp, w, &buf);
+
+    let result = loop {
+        match read() {
+            Ok(Event::Key(k)) if k.kind != KeyEventKind::Release => {
+                let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+                match k.code {
+                    KeyCode::Enter => break Some(buf.clone()),
+                    KeyCode::Char('c') if ctrl => break None,
+                    KeyCode::Char('d') if ctrl && buf.is_empty() => break None,
+                    KeyCode::Backspace => {
+                        buf.pop();
+                        draw_input_row(inp, w, &buf);
+                    }
+                    KeyCode::Char(c) if !ctrl => {
+                        buf.push(c);
+                        draw_input_row(inp, w, &buf);
+                    }
+                    _ => {}
+                }
+            }
+            Ok(_) => {}
+            Err(_) => break None,
+        }
+    };
+    let _ = disable_raw_mode();
+    // Sembunyikan kursor & parkir di area gulir untuk output.
     let park = h.saturating_sub(3).max(1);
-    print!("\x1b[{park};1H");
+    print!("{RESET}\x1b[?25l\x1b[{park};1H");
     io::stdout().flush().ok();
-
-    if n == 0 {
-        None
-    } else {
-        Some(line.trim().to_string())
-    }
+    result.map(|s| s.trim().to_string())
 }
