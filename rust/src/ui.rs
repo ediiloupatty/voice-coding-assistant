@@ -108,19 +108,10 @@ pub fn bye(msg: &str) {
     println!("\n{MUTED}{SIGIL} {msg}{RESET}");
 }
 
-/// Echo ucapan/ketikan user dalam bar abu-abu full-width.
+/// Echo ucapan/ketikan user — ringkas, satu baris pas teks (bukan blok besar).
 pub fn user_echo(text: &str) {
-    let w = width();
-    let blank = format!("{BG_INPUT}{}{RESET}", " ".repeat(w));
-    let shown = format!(" {PROMPT} {text}");
-    let pad = w.saturating_sub(shown.chars().count());
     println!();
-    println!("{blank}");
-    println!(
-        "{BG_INPUT}{FG_INPUT}{BOLD}{ACCENT} {PROMPT} {NOBOLD}{FG_INPUT}{text}{}{RESET}",
-        " ".repeat(pad)
-    );
-    println!("{blank}");
+    println!("{BG_INPUT}{FG_INPUT}{BOLD}{ACCENT} {PROMPT} {NOBOLD}{FG_INPUT}{text} {RESET}");
 }
 
 // ===========================================================================
@@ -295,7 +286,9 @@ pub fn read_line_bar(w: usize, h: usize) -> Option<String> {
         }
     };
     let _ = disable_raw_mode();
-    // Sembunyikan kursor & parkir di area gulir untuk output.
+    // Kosongkan kotak input (teks sudah "pindah ke atas" via echo) lalu
+    // sembunyikan kursor & parkir di area gulir untuk output.
+    draw_input_row(inp, w, "");
     let park = h.saturating_sub(3).max(1);
     print!("{RESET}\x1b[?25l\x1b[{park};1H");
     io::stdout().flush().ok();
