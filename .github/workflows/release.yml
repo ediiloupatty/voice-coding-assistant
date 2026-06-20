@@ -22,11 +22,11 @@ jobs:
             target: x86_64-unknown-linux-gnu
             bin: voca
             asset: voca-linux-x64
-          - os: macos-14          # Apple Silicon (arm64) — runner native
+          - os: macos-14          # Apple Silicon (arm64) — native
             target: aarch64-apple-darwin
             bin: voca
             asset: voca-macos-arm64
-          - os: macos-13          # Intel (x64) — runner native, hindari cross-compile
+          - os: macos-14          # x64 di-cross-compile dari arm64 (runner Intel mac dipensiun)
             target: x86_64-apple-darwin
             bin: voca
             asset: voca-macos-x64
