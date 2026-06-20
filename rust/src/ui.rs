@@ -41,81 +41,38 @@ fn vu_meter(idx: usize) -> String {
 
 // ── Layout ───────────────────────────────────────────────────────────────────
 //
-// ┌────────────────────────────────────────────┐  Length(2)   Header
-// ├────────────────────────────────────────────┤  Fill(1)     Chat
+// ┌────────────────────────────────────────────┐  Fill(1)     Chat (mulai atas)
 // ├────────────────────────────────────────────┤  Length(3)   Input area (form)
 // ├────────────────────────────────────────────┤  Length(1)   Status bar (info)
 // └────────────────────────────────────────────┘
-// Form input diletakkan DI ATAS bar info (model/voice/dll) sesuai permintaan.
+// Tanpa header judul atas. Form input diletakkan DI ATAS bar info (model/voice/dll).
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
+    // Header judul atas dihapus — chat langsung mulai dari baris paling atas.
+    // Identitas (VOCA/model/lang/folder/mode) tetap ada di banner pembuka, dan
+    // indikator bahasa pindah ke status bar bawah.
     let chunks = Layout::vertical([
-        Constraint::Length(2),
         Constraint::Fill(1),
         Constraint::Length(3),
         Constraint::Length(1),
     ])
     .split(frame.area());
 
-    render_header(frame, app, chunks[0]);
-    render_chat(frame, app, chunks[1]);
-    render_input(frame, app, chunks[2]);
-    render_status(frame, app, chunks[3]);
+    render_chat(frame, app, chunks[0]);
+    render_input(frame, app, chunks[1]);
+    render_status(frame, app, chunks[2]);
 
     // Palet slash command mengambang tepat di atas bar input saat user mengetik "/".
     if app.input_mode == InputMode::Normal {
         let matches = crate::app::slash_matches(app.input.value());
         if !matches.is_empty() {
-            render_slash_palette(frame, app, &matches, chunks[2]);
+            render_slash_palette(frame, app, &matches, chunks[1]);
         }
     }
 
     if let Some(ref menu) = app.menu {
         render_menu(frame, menu, frame.area());
     }
-}
-
-// ── Header ───────────────────────────────────────────────────────────────────
-
-fn render_header(frame: &mut Frame, app: &App, area: Rect) {
-    let [title_row, sep_row] = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Length(1),
-    ])
-    .areas(area);
-
-    // Badge mode (VOICE/TEXT) sengaja TIDAK ditampilkan di header — info itu sudah
-    // ada di status bar bawah. Header dibiarkan bersih: judul + indikator bahasa.
-    let lang_str = format!(" {} ", app.voice.lang.to_uppercase());
-
-    let left_len = "  ◈ VOCA  ·  AI Coding Assistant".chars().count() as u16;
-    let right_len = lang_str.chars().count() as u16;
-    let pad = area.width.saturating_sub(left_len + right_len) as usize;
-
-    // Header netral — tanpa warna hijau. Latar menyatu dengan halaman, judul ink
-    // gelap, garis pemisah abu-abu lembut.
-    let sep_color = Color::Rgb(203, 213, 225); // slate-200, netral
-
-    let title = Line::from(vec![
-        Span::styled("  ◈ ", Style::default().fg(TEXT_FG).bold()),
-        Span::styled("VOCA", Style::default().fg(TEXT_FG).bold()),
-        Span::styled("  ·  AI Coding Assistant", Style::default().fg(MUTED)),
-        Span::raw(" ".repeat(pad)),
-        Span::styled(lang_str, Style::default().fg(MUTED).bg(CHAT_BG)),
-    ]);
-
-    frame.render_widget(
-        Paragraph::new(title).style(Style::default().bg(CHAT_BG)),
-        title_row,
-    );
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            "─".repeat(area.width as usize),
-            Style::default().fg(sep_color),
-        )))
-        .style(Style::default().bg(CHAT_BG)),
-        sep_row,
-    );
 }
 
 // ── Chat ─────────────────────────────────────────────────────────────────────
@@ -310,11 +267,15 @@ fn render_status(frame: &mut Frame, app: &App, area: Rect) {
         " type / for commands "
     };
 
+    let lang_str = format!(" lang · {} ", app.voice.lang.to_uppercase());
+
     let bar = Line::from(vec![
         Span::styled(model_str,              Style::default().fg(MUTED).bg(STATUS_BG)),
         Span::styled("│",                    Style::default().fg(BORDER).bg(STATUS_BG)),
         Span::styled(format!(" {icon}"),     mode_style),
         Span::styled(mode_str,               mode_style),
+        Span::styled("│",                    Style::default().fg(BORDER).bg(STATUS_BG)),
+        Span::styled(lang_str,               Style::default().fg(MUTED).bg(STATUS_BG)),
         Span::styled("│",                    Style::default().fg(BORDER).bg(STATUS_BG)),
         Span::styled(hint,                   Style::default().fg(MUTED).bg(STATUS_BG)),
         Span::styled(" ".repeat(area.width as usize), Style::default().bg(STATUS_BG)),
