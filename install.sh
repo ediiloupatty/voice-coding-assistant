@@ -50,14 +50,19 @@ add_env() { # add_env NAMA NILAI  → tulis export ke shell rc bila belum ada
 
 if [ "$WITH_VOICE" = "1" ]; then
   say "Menyiapkan sidecar suara (Python) di $VOCA_HOME ..."
-  command -v python3 >/dev/null || die "python3 diperlukan untuk --with-voice."
-  command -v git     >/dev/null || die "git diperlukan untuk --with-voice."
+  command -v python3 >/dev/null || die "python3 diperlukan untuk --with-voice (pasang dari paket distro / python.org)."
+  command -v tar     >/dev/null || die "tar diperlukan untuk --with-voice."
 
-  if [ -d "$VOCA_HOME/.git" ]; then
-    git -C "$VOCA_HOME" pull --ff-only
-  else
-    rm -rf "$VOCA_HOME"; git clone --depth 1 "https://github.com/$REPO.git" "$VOCA_HOME"
-  fi
+  # Ambil kode (paket Python 'voca') via TARBALL — tanpa git. --strip-components=1
+  # membuang folder atas (voice-coding-assistant-main/) langsung ke $VOCA_HOME;
+  # file source ditimpa, tapi .venv/ & models/ yang sudah ada tetap dipertahankan.
+  say "  Mengambil kode suara (tarball, tanpa git)..."
+  mkdir -p "$VOCA_HOME"
+  src_tar="$(mktemp)"
+  curl -fsSL "https://github.com/$REPO/archive/refs/heads/main.tar.gz" -o "$src_tar" \
+    || die "gagal mengunduh source dari GitHub"
+  tar -xzf "$src_tar" -C "$VOCA_HOME" --strip-components=1 || die "gagal mengekstrak source"
+  rm -f "$src_tar"
 
   say "  Memasang dependensi suara (bisa beberapa menit)..."
   python3 -m venv "$VOCA_HOME/.venv"
