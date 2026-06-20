@@ -29,11 +29,16 @@ _syn = None         # SynthesisConfig di-cache
 
 
 def _get_syn_config():
-    """Konfigurasi sintesis Piper (tempo & volume) untuk kesan lebih lembut."""
+    """Konfigurasi sintesis Piper: tempo, volume, + variasi agar tak monoton/robot."""
     global _syn
     if _syn is None:
         from piper import SynthesisConfig
-        _syn = SynthesisConfig(length_scale=config.VOICE_SPEED, volume=config.VOICE_VOLUME)
+        _syn = SynthesisConfig(
+            length_scale=config.VOICE_SPEED,     # <1 = lebih cepat
+            volume=config.VOICE_VOLUME,
+            noise_scale=config.VOICE_NOISE,      # variasi timbre
+            noise_w_scale=config.VOICE_NOISE_W,  # variasi ritme/intonasi → lebih natural
+        )
     return _syn
 
 
@@ -191,11 +196,14 @@ def _bersihkan_teks(teks: str) -> str:
     return teks
 
 
-def _piper_stream_play(teks: str) -> None:
+def _piper_stream_play(teks: str, barge_evt=None) -> None:
     """Sintesis dengan Piper dan alirkan audio ke speaker, mulus tanpa jeda.
 
     Audio mentah (PCM 16-bit) ditulis ke pemutar potongan demi potongan begitu
     Piper menghasilkannya — suara mulai terdengar dalam ~0.2-0.4 detik.
+
+    `barge_evt`: threading.Event opsional — bila di-set (user menyela), hentikan
+    pemutaran lebih awal.
     """
     voice = _get_voice()
     sr = voice.config.sample_rate
@@ -203,9 +211,45 @@ def _piper_stream_play(teks: str) -> None:
     player = _open_player(sr)
     try:
         for chunk in voice.synthesize(teks, _get_syn_config()):
+            if barge_evt is not None and barge_evt.is_set():
+                break
             player.write(chunk.audio_int16_bytes)
     finally:
         player.close()
+
+
+def _start_barge_monitor():
+    """Pantau mic SELAGI TTS bicara; set Event saat user mulai bicara (barge-in).
+
+    Return (evt, stop). EKSPERIMENTAL — tanpa acoustic echo cancellation, mic
+    juga mendengar suara TTS sendiri, jadi praktis hanya andal dengan headphone.
+    """
+    import threading
+    import sounddevice as sd
+    from . import listen as _listen
+
+    evt = threading.Event()
+    stop = threading.Event()
+
+    def run():
+        try:
+            gate = _listen._make_gate()
+            sr = _listen.SAMPLE_RATE
+            run_voiced = 0
+            with sd.InputStream(samplerate=sr, channels=1, dtype="float32") as st:
+                while not stop.is_set() and not evt.is_set():
+                    data, _ = st.read(int(sr * 0.1))
+                    if gate.voiced(data):
+                        run_voiced += 1
+                        if run_voiced >= config.BARGE_IN_CHUNKS:
+                            evt.set()
+                    else:
+                        run_voiced = 0
+        except Exception:
+            pass
+
+    threading.Thread(target=run, daemon=True).start()
+    return evt, stop
 
 
 def _gtts_play(teks: str) -> None:
@@ -240,31 +284,48 @@ def warmup() -> None:
         pass  # nanti fallback ke gTTS saat speak() dipanggil
 
 
-def speak(teks: str) -> None:
-    """Bacakan teks dengan suara. Aman: tidak menghentikan agent kalau gagal."""
+def speak(teks: str) -> bool:
+    """Bacakan teks dengan suara. Aman: tidak menghentikan agent kalau gagal.
+
+    Return True bila user MENYELA (barge-in) saat TTS bicara — pemanggil bisa
+    langsung membuka telinga. Selalu False bila barge-in mati (default).
+    """
     if not config.VOICE_ENABLED:
-        return
+        return False
     bersih = _bersihkan_teks(teks)
     if not bersih:
-        return
+        return False
+
+    evt = stop = None
+    if config.BARGE_IN:
+        try:
+            evt, stop = _start_barge_monitor()
+        except Exception:
+            evt = stop = None
 
     try:
         # Utama: Piper lokal (kalau model bahasa ini ada). Selain itu langsung gTTS.
         if _piper_available():
             try:
-                _piper_stream_play(bersih)
-                return
+                _piper_stream_play(bersih, barge_evt=evt)
+                return bool(evt is not None and evt.is_set())
             except KeyboardInterrupt:
                 raise
             except Exception as e:
                 print(f"   [Piper gagal ({e}), pakai gTTS...]")
-        _gtts_play(bersih)
+        _gtts_play(bersih)  # gTTS (ffplay) tak mendukung barge-in
+        return False
     except KeyboardInterrupt:
         # Tekan Ctrl+C saat bicara = lewati suara, JANGAN matikan agent.
         print("\n   [narasi suara dilewati]")
+        return False
     except Exception as e:
         # Suara cuma "kulit" — kalau gagal, agent tetap lanjut bekerja.
         print(f"   [TTS gagal, lanjut tanpa suara: {e}]")
+        return False
+    finally:
+        if stop is not None:
+            stop.set()  # hentikan thread pemantau mic
 
 
 # ---------------------------------------------------------------------------
@@ -443,9 +504,3 @@ class StreamSpeaker:
             self._thread.join(timeout=1.0)
         except Exception:
             pass
-
-
-if __name__ == "__main__":
-    # Tes cepat: python -m voca.voice
-    speak("Halo! Saya Voca, coding assistant kamu. Sekarang suara saya berjalan "
-          "lokal dengan Piper, jadi jauh lebih cepat dan mengalir tanpa jeda.")

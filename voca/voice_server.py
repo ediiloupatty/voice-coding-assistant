@@ -21,6 +21,7 @@ karena stderr diwarisi oleh terminal.
 """
 import json
 import os
+import select
 import sys
 
 # --- Pisahkan kanal protokol (stdout asli) dari output UI ------------------
@@ -40,6 +41,22 @@ def _send(obj) -> None:
     _proto.flush()
 
 
+def _stdin_has_input() -> bool:
+    """True bila ada baris menunggu di stdin (perintah dari core Rust).
+
+    Dipakai saat sedang `listen`: bila core mengirim apa pun (mis. {"cmd":"cancel"}
+    ketika user menekan `t`), konsumsi barisnya & batalkan perekaman. Hanya andal
+    di POSIX. Perintah cancel sengaja TIDAK dibalas agar protokol tetap sinkron.
+    """
+    try:
+        if select.select([sys.stdin], [], [], 0)[0]:
+            sys.stdin.readline()  # konsumsi baris cancel
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def main() -> None:
     # Hangatkan SEMUA model di awal supaya user langsung bisa bicara tanpa jeda:
     # TTS (piper) + STT (whisper). Status tampil di terminal (stderr).
@@ -52,6 +69,14 @@ def main() -> None:
         listen._get_model()   # Whisper (STT) — preload, tak lagi lazy
     except Exception:
         pass
+    # Silero VAD WAJIB (tak ada fallback). Bila gagal dimuat → cetak instruksi
+    # pasang yang jelas lalu keluar; core Rust akan lanjut ke mode teks.
+    try:
+        listen.preload_vad()
+    except Exception:
+        print("  \033[1;31m✗ suara dimatikan — VAD Silero belum terpasang.\033[0m",
+              file=sys.stderr, flush=True)
+        sys.exit(1)
     print("  \033[32m✓ model suara siap.\033[0m", file=sys.stderr, flush=True)
     _send({"ready": True})
 
@@ -77,13 +102,20 @@ def main() -> None:
             if cmd == "ping":
                 _send({"ok": True})
             elif cmd == "speak":
-                voice.speak(req.get("text", ""))
-                _send({"ok": True})
+                barged = voice.speak(req.get("text", ""))
+                _send({"ok": True, "barged": bool(barged)})
             elif cmd == "listen":
                 print("  [mic] mendengarkan…", file=sys.stderr, flush=True)
-                text = listen.listen_auto()
+                # Lapor status suara real-time ke core (indikator "mendengar kamu").
+                def _on_vad(speech: bool) -> None:
+                    _send({"event": "vad", "speech": bool(speech)})
+                text = listen.listen_auto(should_cancel=_stdin_has_input, on_vad=_on_vad)
                 print(f"  [mic] transkripsi: {text!r}", file=sys.stderr, flush=True)
                 _send({"ok": True, "text": text})
+            elif cmd == "cancel":
+                # No-op di luar listen (saat listen, dikonsumsi _stdin_has_input).
+                # Sengaja tak membalas: cancel bersifat fire-and-forget.
+                pass
             else:
                 _send({"ok": False, "error": f"unknown cmd: {cmd}"})
         except Exception as e:

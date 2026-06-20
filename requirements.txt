@@ -6,3 +6,9 @@ faster-whisper>=1.0.0
 sounddevice>=0.4.6
 numpy>=1.24.0
 rich>=13.7.0
+# VAD neural Silero — WAJIB untuk penangkapan suara (tak ada fallback RMS lagi).
+# torch CPU-only (extra-index di bawah) agar tak menarik tumpukan CUDA ber-GB.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch>=2.2
+torchaudio>=2.2
+silero-vad>=5.1

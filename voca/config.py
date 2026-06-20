@@ -79,8 +79,14 @@ PIPER_MODEL = os.getenv("PIPER_MODEL", str(MODELS_DIR / "id_ID-news_tts-medium.o
 # kalau tidak -> otomatis pakai gTTS (online) untuk suara English.
 PIPER_MODEL_EN = os.getenv("PIPER_MODEL_EN", str(MODELS_DIR / "en_US-amy-medium.onnx"))
 VOICE_PITCH = float(os.getenv("VOICE_PITCH", "1.1"))     # nada: >1 lebih tinggi
-VOICE_SPEED = float(os.getenv("VOICE_SPEED", "1.12"))    # tempo: >1 lebih pelan
+VOICE_SPEED = float(os.getenv("VOICE_SPEED", "0.95"))    # tempo: <1 lebih CEPAT
 VOICE_VOLUME = float(os.getenv("VOICE_VOLUME", "0.9"))   # 0..1: kecil = lembut
+# Variasi suara Piper agar TIDAK terdengar robot/monoton:
+#   VOICE_NOISE   (noise_scale)   — variasi timbre/warna suara.
+#   VOICE_NOISE_W (noise_w_scale) — variasi durasi/ritme fonem (intonasi natural).
+# Terlalu tinggi = goyang/warbly; terlalu rendah = datar/robot. 0.6–1.0 wajar.
+VOICE_NOISE = float(os.getenv("VOICE_NOISE", "0.7"))
+VOICE_NOISE_W = float(os.getenv("VOICE_NOISE_W", "0.9"))
 SPEAK_PHONETIC = os.getenv("SPEAK_PHONETIC", "1") != "0"  # eja kata Inggris umum saat bicara
 
 # --- Suara masuk: STT Whisper (lokal/offline) ------------------------------
@@ -88,18 +94,33 @@ WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small")      # tiny..large-v3
 SAMPLE_RATE = 16000                                      # Whisper butuh 16 kHz mono
 
 # --- Sensitivitas suara masuk (anti-"mimpi"/halusinasi saat noise kecil) ---
-# MIN_SPEECH_RMS: ambang energi dianggap "ada suara". TERLALU kecil = noise
-#   ikut terekam → Whisper mengarang. TERLALU besar = ucapan pelan tak terdeteksi.
-#   Cara tuning: kalau noise sering jadi teks → naikkan; kalau suaramu tak
-#   terdeteksi → turunkan. Rentang wajar 0.005–0.03.
-MIN_SPEECH_RMS = float(os.getenv("MIN_SPEECH_RMS", "0.008"))   # diturunkan: 0.012→0.008
-# Chunk bersuara berturut-turut (0.1s/chunk) sebelum dianggap MULAI bicara —
-# mencegah satu spike noise memicu rekaman.
-SPEECH_START_CHUNKS = int(os.getenv("SPEECH_START_CHUNKS", "2"))
+# MIN_SPEECH_RMS: kini HANYA dipakai _terlalu_hening() sebagai pra-cek sebelum
+#   transkrip (lewati Whisper bila audio nyaris hening). Deteksi MULAI/berhenti
+#   bicara sudah ditangani Silero VAD (lihat VAD_THRESHOLD), bukan ambang ini.
+MIN_SPEECH_RMS = float(os.getenv("MIN_SPEECH_RMS", "0.008"))
+# Chunk bersuara berturut-turut (0.1s/chunk) sebelum dianggap MULAI bicara.
+# Silero sudah tahan noise → 1 chunk cukup (latency mulai lebih rendah).
+SPEECH_START_CHUNKS = int(os.getenv("SPEECH_START_CHUNKS", "1"))
 # Durasi suara minimum (detik) agar rekaman diterima — buang blip/ketukan.
 MIN_SPEECH_SECONDS = float(os.getenv("MIN_SPEECH_SECONDS", "0.3"))  # 0.4→0.3
 # Hening (detik) untuk berhenti merekam otomatis. Lebih kecil = lebih responsif.
-SILENCE_DURATION = float(os.getenv("SILENCE_DURATION", "1.0"))     # 0.7→1.0 (lebih toleran jeda)
+# Dengan endpointing Silero yang akurat, 0.7 terasa lebih "nyambung" tanpa
+# memotong jeda alami antar-kata.
+SILENCE_DURATION = float(os.getenv("SILENCE_DURATION", "0.7"))
+# Batas tunggu (detik) untuk MULAI bicara. Kalau dalam waktu ini tak ada suara,
+# jendela dengar ditutup & dibuka lagi (recycle cepat) — mencegah "diam" 60 detik
+# kalau ucapan tak terdeteksi. Durasi rekam sesungguhnya tetup max_seconds.
+SPEECH_START_TIMEOUT = float(os.getenv("SPEECH_START_TIMEOUT", "8.0"))
+# Ambang Silero VAD (0–1): prob ≥ nilai ini dianggap "ada ucapan". Naikkan kalau
+# noise masih lolos; turunkan kalau ucapan pelan tak tertangkap.
+VAD_THRESHOLD = float(os.getenv("VAD_THRESHOLD", "0.5"))
+# Barge-in: izinkan user MENYELA saat asisten bicara (TTS) dengan langsung bicara.
+# EKSPERIMENTAL & default MATI — tanpa acoustic echo cancellation, mic akan
+# mendengar suara TTS sendiri & langsung "menyela". Aktifkan HANYA dengan headphone:
+#   export VOCA_BARGE_IN=1
+BARGE_IN = os.getenv("VOCA_BARGE_IN", "0") == "1"
+# Chunk bersuara berturut (0.1s) yang dibutuhkan untuk memicu barge-in.
+BARGE_IN_CHUNKS = int(os.getenv("VOCA_BARGE_IN_CHUNKS", "3"))
 # beam_size Whisper: 1 = greedy (PALING CEPAT, akurasi sedikit turun),
 # 5 = paling akurat tapi lambat di CPU. Untuk perintah pendek, 1 biasanya cukup.
 WHISPER_BEAM_SIZE = int(os.getenv("WHISPER_BEAM_SIZE", "1"))
