@@ -1,60 +1,22 @@
 @echo off
 REM ===========================================================================
-REM  Pemasang Voca - AI Coding Assistant (perintah: voca) untuk Windows (CMD).
-REM  Mengunduh binary core (Rust) jadi — sama seperti install.ps1, tanpa Python.
+REM  install.bat — pemasang Voca (Windows / CMD).
 REM
-REM  Cara pakai (CMD), satu baris:
+REM  Hanya bootstrap: menjalankan installer PENUH (install.ps1) di console yang
+REM  SAMA — binary + suara + bahasa + model, bar progres 1-100%, lalu minta API
+REM  key dan jalankan 'voca' DI SINI (tanpa membuka window baru).
+REM
+REM  Pakai (satu baris di CMD):
 REM    curl -fsSL -o "%TEMP%\voca-install.bat" https://raw.githubusercontent.com/ediiloupatty/voice-coding-assistant/main/install.bat ^&^& "%TEMP%\voca-install.bat"
 REM
-REM  Override: VOCA_BASE_URL (sumber binary), VOCA_INSTALL_DIR (folder bin).
-REM  Mode suara (STT/TTS) butuh sidecar Python — siapkan manual (lihat rust/README.md)
-REM  lalu set VOCA_VOICE_PYTHON & VOCA_VOICE_HOME.
+REM  Override diteruskan otomatis lewat env: VOCA_BASE_URL, VOCA_INSTALL_DIR,
+REM  VOCA_HOME, VOCA_NO_VOICE (=1 untuk lewati suara).
 REM ===========================================================================
-setlocal enabledelayedexpansion
-
+setlocal
 set "REPO=ediiloupatty/voice-coding-assistant"
-if not defined VOCA_BASE_URL set "VOCA_BASE_URL=https://github.com/%REPO%/releases/latest/download"
-if not defined VOCA_INSTALL_DIR set "VOCA_INSTALL_DIR=%LOCALAPPDATA%\Voca"
-set "ASSET=voca-windows-x64.exe"
-set "DEST=%VOCA_INSTALL_DIR%\voca.exe"
 
-echo ===========================================
-echo   Memasang Voca core (perintah: voca)
-echo ===========================================
+where powershell >nul 2>nul || (echo [ERROR] PowerShell tak ditemukan ^(butuh Windows 10+^). & exit /b 1)
 
-REM --- 1) Prasyarat ---
-where curl >nul 2>nul || (echo [ERROR] curl tidak ditemukan ^(butuh Windows 10+^). & goto :fail)
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/%REPO%/main/install.ps1 | iex"
 
-REM --- 2) Unduh binary Rust jadi dari GitHub Releases ---
-if not exist "%VOCA_INSTALL_DIR%" mkdir "%VOCA_INSTALL_DIR%"
-echo Mengunduh Voca core ^(%ASSET%^)...
-curl -fsSL "%VOCA_BASE_URL%/%ASSET%" -o "%DEST%" || (echo [ERROR] Gagal mengunduh binary dari %VOCA_BASE_URL%/%ASSET% & goto :fail)
-echo Core terpasang: %DEST%
-
-REM --- 3) Tambahkan ke PATH (user, aman lewat PowerShell) ---
-powershell -NoProfile -Command "$d='%VOCA_INSTALL_DIR%'; $p=[Environment]::GetEnvironmentVariable('PATH','User'); if ($p -notlike '*'+$d+'*') { [Environment]::SetEnvironmentVariable('PATH', $p+';'+$d, 'User') }"
-
-echo.
-echo ===========================================
-echo  Selesai terpasang di %VOCA_INSTALL_DIR%
-echo ===========================================
-echo  Jalankan:  voca
-echo    ^(API key diminta otomatis saat pertama dijalankan^)
-echo  Mode suara ^(ngomong^): jalankan di PowerShell:
-echo    irm https://raw.githubusercontent.com/%REPO%/main/install-voice.ps1 ^| iex
-echo.
-
-REM --- 4) Tawarkan buka terminal baru (PATH ter-refresh) biar 'voca' langsung jalan ---
-choice /c RK /n /m "Tekan [R] buka terminal baru ^& pakai voca sekarang, atau [K] keluar: "
-if errorlevel 2 goto :selesai
-start "Voca" cmd /k "set PATH=%VOCA_INSTALL_DIR%;%PATH% & cls & echo Voca siap dipakai. Ketik:  voca & echo."
-
-:selesai
 endlocal
-exit /b 0
-
-:fail
-echo.
-echo Instalasi GAGAL. Perbaiki error di atas lalu jalankan ulang.
-endlocal
-exit /b 1
