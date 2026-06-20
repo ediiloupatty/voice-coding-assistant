@@ -30,7 +30,7 @@ pub fn all() -> Vec<Provider> {
                 "QWEN_BASE_URL",
                 "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
             ),
-            model: env_or("QWEN_MODEL", "qwen-plus"),
+            model: env_or("QWEN_MODEL", "qwen-max"),
         },
         Provider {
             code: "openai",
@@ -51,7 +51,7 @@ pub fn all() -> Vec<Provider> {
             name: "DeepSeek",
             api_key: env::var("DEEPSEEK_API_KEY").ok(),
             base_url: env_or("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
-            model: env_or("DEEPSEEK_MODEL", "deepseek-v4-flash"),
+            model: env_or("DEEPSEEK_MODEL", "deepseek-chat"),
         },
     ]
 }

@@ -138,14 +138,14 @@ pub async fn stream_to_channel(
             Err(e) => {
                 if attempt >= limits.llm_max_retries {
                     let _ = tx.send(AppEvent::LlmError(
-                        format!("LLM gagal setelah {attempt} percobaan: {e}")
+                        format!("LLM failed after {attempt} attempts: {e}")
                     ));
                     return;
                 }
                 let delay = limits.llm_retry_base_delay
                     * 2f64.powi((attempt - 1) as i32);
                 let _ = tx.send(AppEvent::LlmError(
-                    format!("Koneksi LLM bermasalah ({e}); coba lagi dalam {delay:.0}s…")
+                    format!("LLM connection issue ({e}); retrying in {delay:.0}s…")
                 ));
                 tokio::time::sleep(std::time::Duration::from_secs_f64(delay)).await;
             }
@@ -166,7 +166,7 @@ async fn try_stream(
     let api_key = provider
         .api_key
         .as_deref()
-        .context("provider tidak punya API key")?;
+        .context("provider has no API key")?;
     let url = format!(
         "{}/chat/completions",
         provider.base_url.trim_end_matches('/')
@@ -188,7 +188,7 @@ async fn try_stream(
         .json(&body)
         .send()
         .await
-        .context("gagal menghubungi API")?;
+        .context("failed to reach API")?;
 
     if !resp.status().is_success() {
         let status = resp.status();

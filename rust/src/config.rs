@@ -16,8 +16,7 @@ use std::path::PathBuf;
 #[derive(Clone)]
 pub struct Limits {
     pub max_history: usize,
-    #[allow(dead_code)]
-    pub max_tool_iters: usize, // reserved: batas iterasi tool chaining
+    pub max_tool_iters: usize, // batas iterasi tool chaining per giliran
     pub llm_max_retries: u32,
     pub llm_retry_base_delay: f64,
     pub temperature: f32,
@@ -53,6 +52,80 @@ struct UserConfig {
 
 fn config_path() -> Option<PathBuf> {
     dirs::config_dir().map(|d| d.join("voca").join("config.json"))
+}
+
+// ---------------------------------------------------------------------------
+// Trusted folders — gerbang keamanan ala Claude CLI / Codex
+// ---------------------------------------------------------------------------
+
+#[derive(Default, Serialize, Deserialize)]
+struct TrustList {
+    #[serde(default)]
+    folders: Vec<String>,
+}
+
+fn trusted_path() -> Option<PathBuf> {
+    dirs::config_dir().map(|d| d.join("voca").join("trusted.json"))
+}
+
+fn load_trust() -> TrustList {
+    trusted_path()
+        .and_then(|p| fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+/// Path kerja dinormalisasi (canonical) sebagai string, untuk perbandingan.
+fn canon_cwd() -> String {
+    std::env::current_dir()
+        .ok()
+        .map(|p| p.canonicalize().unwrap_or(p))
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default()
+}
+
+/// True bila folder kerja saat ini sudah pernah dipercaya.
+pub fn is_trusted_cwd() -> bool {
+    let cur = canon_cwd();
+    !cur.is_empty() && load_trust().folders.iter().any(|f| f == &cur)
+}
+
+/// Tandai folder kerja saat ini sebagai tepercaya (tersimpan permanen).
+pub fn trust_cwd() -> std::io::Result<()> {
+    let cur = canon_cwd();
+    if cur.is_empty() {
+        return Ok(());
+    }
+    let mut list = load_trust();
+    if !list.folders.iter().any(|f| f == &cur) {
+        list.folders.push(cur);
+    }
+    if let Some(p) = trusted_path() {
+        if let Some(parent) = p.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let json = serde_json::to_string_pretty(&list).unwrap_or_default();
+        fs::write(p, json)?;
+    }
+    Ok(())
+}
+
+/// Muat konteks proyek dari file pertama yang ada di folder kerja:
+/// VOCA.md → AGENTS.md → CLAUDE.md → README.md. Dibatasi ukurannya agar tak
+/// membanjiri context window. Return (nama_file, isi).
+pub fn load_project_context() -> Option<(String, String)> {
+    const MAX_CHARS: usize = 6000;
+    for name in ["VOCA.md", "AGENTS.md", "CLAUDE.md", "README.md"] {
+        if let Ok(txt) = fs::read_to_string(name) {
+            let trimmed = txt.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let ctx: String = trimmed.chars().take(MAX_CHARS).collect();
+            return Some((name.to_string(), ctx));
+        }
+    }
+    None
 }
 
 fn load_user_config() -> UserConfig {
@@ -107,20 +180,20 @@ pub fn ensure_api_key(provider_code: &str, provider_name: &str) -> Result<String
     // Prompt interaktif.
     use std::io::Write;
     println!();
-    println!("  Belum ada API key untuk {provider_name}.");
-    print!("  Tempel API key Anda: ");
+    println!("  No API key yet for {provider_name}.");
+    print!("  Paste your API key: ");
     std::io::stdout().flush().ok();
     let mut key = String::new();
     std::io::stdin().read_line(&mut key)?;
     let key = key.trim().to_string();
     if key.is_empty() {
-        anyhow::bail!("API key kosong — tidak bisa lanjut.");
+        anyhow::bail!("API key is empty — cannot continue.");
     }
 
     env::set_var(env_name, &key);
     match save_user_var(env_name, &key) {
-        Ok(path) => println!("  ✓ Tersimpan di {}", path.display()),
-        Err(e) => eprintln!("  (gagal menyimpan config: {e} — key tetap dipakai sesi ini)"),
+        Ok(path) => println!("  ✓ Saved to {}", path.display()),
+        Err(e) => eprintln!("  (failed to save config: {e} — key will be used for this session only)"),
     }
     Ok(key)
 }
