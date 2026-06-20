@@ -7,5 +7,10 @@ models/*.onnx
 .voca/
 .pytest_cache/
 
+# Log & artefak debug build (jangan sampai masuk repo lagi)
+*.log
+rust/target/
+pty_out.txt
+
 # Proyek React/Vite percobaan tempat Voca dipakai — bukan bagian repo ini.
 tts/

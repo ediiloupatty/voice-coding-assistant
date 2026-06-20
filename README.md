@@ -8,8 +8,9 @@ Kamu beri perintah (ketik atau bicara), Voca menganalisis folder kerja,
 mengerjakan tugas, lalu **menarasikan progresnya secara real-time lewat suara** —
 seperti pair-programming dengan rekan yang aktif berkomunikasi.
 
-[![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/)
-[![Platform](https://img.shields.io/badge/platform-Linux-informational.svg)](#kebutuhan-sistem)
+[![Core](https://img.shields.io/badge/core-Rust-orange.svg)](https://www.rust-lang.org/)
+[![Voice](https://img.shields.io/badge/voice-Python%20sidecar-blue.svg)](https://www.python.org/)
+[![Platform](https://img.shields.io/badge/platform-Linux%20%C2%B7%20macOS%20%C2%B7%20Windows-informational.svg)](#kebutuhan-sistem)
 [![Version](https://img.shields.io/badge/version-1.0.0-orange.svg)](#)
 
 <br>
@@ -64,16 +65,29 @@ Voca dirakit dari tiga "indra" yang dapat ditukar lewat konfigurasi:
 
 ## 🚀 Instalasi Cepat
 
-Satu perintah — otomatis unduh kode, buat virtualenv, install dependensi, unduh
-model suara, minta API key, dan pasang perintah `voca`.
+Satu perintah — mengunduh **binary jadi** (core Rust) dan memasang perintah
+`voca`. Tidak perlu Python/Git untuk core. API key diminta otomatis saat
+pertama dijalankan.
 
-**Linux / macOS** (Terminal):
+**Linux / macOS** — mode teks (kilat, 1 binary):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ediiloupatty/voice-coding-assistant/main/install.sh | bash
 ```
 
-**Windows** (CMD):
+Tambah suara (Whisper STT + Piper TTS lewat sidecar Python):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ediiloupatty/voice-coding-assistant/main/install.sh | bash -s -- --with-voice
+```
+
+**Windows** — PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/ediiloupatty/voice-coding-assistant/main/install.ps1 | iex
+```
+
+…atau CMD:
 
 ```bat
 curl -fsSL -o "%TEMP%\voca-install.bat" https://raw.githubusercontent.com/ediiloupatty/voice-coding-assistant/main/install.bat && "%TEMP%\voca-install.bat"
@@ -86,19 +100,26 @@ voca
 ```
 
 > [!NOTE]
-> Di Windows/macOS audio diputar lewat **sounddevice/PortAudio** (bukan ALSA).
-> Pastikan `python`, `git`, dan `curl` sudah terpasang; `ffmpeg` opsional (untuk
-> pitch-shift suara). Setiap pengguna memakai **API key Qwen sendiri**.
+> **Core (mode teks) cukup `curl`** — binary mandiri, tanpa Python/Git.
+> **Mode suara** butuh sidecar Python: di Linux/macOS otomatis dengan
+> `--with-voice`; di Windows disiapkan manual (lihat `rust/README.md`).
+> Audio diputar lewat **sounddevice/PortAudio**; `ffmpeg` opsional (pitch-shift).
+> Setiap pengguna memakai **API key Qwen sendiri**.
 
 ---
 
 ## 🧩 Kebutuhan Sistem
 
+**Core (mode teks)** — binary Rust mandiri. Cuma butuh `curl` untuk memasang;
+**tanpa** Python/Git.
+
+**Mode suara** (opsional) menambahkan sidecar Python:
+
 | Kebutuhan | Untuk |
 |-----------|-------|
-| `python3` (3.9+), `git`, `curl` | menjalankan & memasang |
-| `ffmpeg` | pemrosesan audio |
-| `alsa-utils` (`aplay`) | pemutaran suara |
+| `python3` (3.9+), `git` | menyiapkan sidecar suara (`--with-voice`) |
+| `ffmpeg` | pemrosesan audio (opsional, pitch-shift) |
+| `alsa-utils` (`aplay`) | pemutaran suara (Linux) |
 | **PortAudio** | input mikrofon |
 
 ```bash
@@ -109,10 +130,9 @@ sudo apt install python3 git curl ffmpeg alsa-utils portaudio19-dev
 sudo dnf install python3 git curl ffmpeg alsa-utils portaudio-devel
 ```
 
-**Windows:** pasang [Python](https://python.org) (centang *Add to PATH*) dan
-[Git](https://git-scm.com). `curl` sudah ada di Windows 10+. `ffmpeg` opsional —
-unduh dari [ffmpeg.org](https://ffmpeg.org) dan tambahkan ke PATH bila ingin
-pitch-shift suara. Audio & mikrofon lewat `sounddevice` (terpasang otomatis).
+**Windows:** core cukup `curl` (sudah ada di Windows 10+). Untuk **mode suara**,
+pasang [Python](https://python.org) (centang *Add to PATH*) & siapkan sidecar
+manual (lihat `rust/README.md`); `ffmpeg` opsional untuk pitch-shift.
 
 ---
 
@@ -249,19 +269,18 @@ QWEN_TEMPERATURE=0.1 MAX_TOOL_ITERS=25 voca --text
 
 ```
 voice-coding-assistant/
-├── voca/                 # paket utama
-│   ├── __main__.py       # entry: python -m voca [--text]
-│   ├── config.py         # SEMUA setting & path terpusat di sini
-│   ├── agent.py          # otak: loop LLM + tool use + history + sesi + UI
-│   ├── tools.py          # tangan: list/search/read/edit/write, run command, diff
+├── rust/                 # CORE (binary `voca`) — otak: LLM loop, tools, UI, voicebridge
+│   └── src/              # agent.rs, tools.rs, llm.rs, ui.rs, voicebridge.rs, …
+├── voca/                 # SIDECAR SUARA (Python) + standalone fallback
+│   ├── voice_server.py   # server suara dipanggil core lewat stdin/stdout (JSON)
 │   ├── voice.py          # mulut: TTS Piper (+ fallback gTTS)
-│   └── listen.py         # telinga: STT Whisper
-├── tests/                # tes pytest (tanpa API/audio)
-├── .github/workflows/    # CI GitHub Actions
-├── models/               # model suara Piper (.onnx, tidak ikut git)
-├── install.sh            # pemasang satu-perintah (Linux)
-├── requirements.txt      # dependensi runtime
-├── requirements-dev.txt  # + pytest untuk pengembangan
+│   ├── listen.py         # telinga: STT Whisper + VAD Silero
+│   └── config.py         # setting suara
+├── tts/                  # landing page (React/Vite) — situs statis
+├── .github/workflows/    # ci.yml (tes) + release.yml (build & upload binary)
+├── install.sh            # pemasang Linux/macOS (unduh binary, opsional --with-voice)
+├── install.ps1 / .bat    # pemasang Windows (unduh binary)
+├── requirements.txt      # dependensi sidecar suara (Python)
 └── .env                  # API key & setting (tidak ikut git)
 ```
 

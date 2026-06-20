@@ -63,6 +63,10 @@ if [ "$WITH_VOICE" = "1" ]; then
   python3 -m venv "$VOCA_HOME/.venv"
   "$VOCA_HOME/.venv/bin/pip" install -q --upgrade pip
   "$VOCA_HOME/.venv/bin/pip" install -q faster-whisper piper-tts sounddevice numpy python-dotenv
+  # VAD neural Silero (wajib). torch CPU-only agar tak menarik CUDA ber-GB.
+  say "  Memasang VAD Silero (torch CPU, ~200MB)..."
+  "$VOCA_HOME/.venv/bin/pip" install -q torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+  "$VOCA_HOME/.venv/bin/pip" install -q silero-vad
 
   say "  Mengunduh model suara Piper (~120MB)..."
   mkdir -p "$VOCA_HOME/models"
