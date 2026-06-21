@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Voca · Alur Suara (input → output)</title>
+<style>
+  :root{
+    --bg:#0b1220; --panel:#111a2e; --panel2:#0e1626; --line:#22304d;
+    --teal:#2dd4bf; --teal-dim:#155e54; --amber:#f5b955; --amber-dim:#5a4416;
+    --txt:#e6edf7; --muted:#8aa0bf; --muted2:#5d7298;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--txt);
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+  a{color:var(--teal)}
+  .wrap{max-width:1080px;margin:0 auto;padding:28px 20px 80px}
+  header h1{font-size:22px;margin:0 0 4px;letter-spacing:.3px}
+  header h1 b{color:var(--teal)}
+  header p{margin:0;color:var(--muted);font-size:13.5px}
+
+  /* ── Payload (bentuk data berjalan) ───────────────────────── */
+  .stage-now{margin:20px 0 8px;background:linear-gradient(180deg,var(--panel),var(--panel2));
+    border:1px solid var(--line);border-radius:16px;padding:18px 20px;display:flex;
+    align-items:center;gap:18px;min-height:92px;position:relative;overflow:hidden}
+  .stage-now .emoji{font-size:40px;line-height:1;filter:drop-shadow(0 0 14px rgba(45,212,191,.35));
+    transition:transform .35s ease}
+  .stage-now .meta{flex:1;min-width:0}
+  .stage-now .k{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted2)}
+  .stage-now .v{font-size:18px;font-weight:650;margin-top:2px}
+  .stage-now .form{margin-top:4px;color:var(--teal);font-size:13.5px;font-family:ui-monospace,Menlo,Consolas,monospace}
+  .stage-now .badge{font-size:11px;font-weight:700;padding:4px 10px;border-radius:999px;white-space:nowrap}
+  .badge.lokal{background:var(--teal-dim);color:#bdfbf0;border:1px solid #1f8c7e}
+  .badge.remote{background:var(--amber-dim);color:#ffe2ab;border:1px solid #8a6a1f}
+
+  /* mini visualizers in payload */
+  .wave{display:flex;align-items:flex-end;gap:3px;height:34px}
+  .wave i{width:4px;background:var(--teal);border-radius:2px;animation:bounce 1s infinite ease-in-out}
+  @keyframes bounce{0%,100%{height:6px;opacity:.5}50%{height:32px;opacity:1}}
+
+  /* ── Controls ─────────────────────────────────────────────── */
+  .controls{display:flex;align-items:center;gap:10px;margin:14px 0 6px;flex-wrap:wrap}
+  button{background:var(--teal);color:#04231f;border:0;font-weight:700;font-size:13.5px;
+    padding:9px 16px;border-radius:10px;cursor:pointer;transition:filter .15s}
+  button:hover{filter:brightness(1.08)}
+  button.ghost{background:transparent;color:var(--teal);border:1px solid var(--teal-dim)}
+  .controls .sp{flex:1}
+  .speed{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px}
+  .speed input{accent-color:var(--teal)}
+  .legend{display:flex;gap:16px;color:var(--muted);font-size:12.5px;margin-top:2px}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .dot{width:9px;height:9px;border-radius:50%}
+  .dot.t{background:var(--teal)} .dot.a{background:var(--amber)}
+
+  /* ── Pipeline rail + cards ────────────────────────────────── */
+  .pipe{position:relative;margin-top:18px;padding-left:34px}
+  .rail{position:absolute;left:12px;top:6px;bottom:6px;width:3px;background:var(--line);border-radius:3px}
+  .pulse{position:absolute;left:6px;width:15px;height:15px;border-radius:50%;
+    background:var(--teal);box-shadow:0 0 0 6px rgba(45,212,191,.18),0 0 18px rgba(45,212,191,.8);
+    top:0;transform:translateY(-50%);transition:top .45s cubic-bezier(.45,.05,.3,1);z-index:5}
+  .pulse.remote{background:var(--amber);box-shadow:0 0 0 6px rgba(245,185,85,.18),0 0 18px rgba(245,185,85,.85)}
+
+  .group{margin:18px 0 8px;font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted2)}
+  .group:first-child{margin-top:0}
+
+  .card{position:relative;background:var(--panel2);border:1px solid var(--line);border-radius:13px;
+    padding:13px 16px 13px 14px;margin:9px 0;display:flex;gap:14px;align-items:flex-start;
+    opacity:.5;transition:opacity .3s,border-color .3s,transform .3s,background .3s}
+  .card .n{flex:none;width:30px;height:30px;border-radius:8px;background:#0a1322;border:1px solid var(--line);
+    display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;color:var(--muted)}
+  .card .ic{flex:none;font-size:22px;width:26px;text-align:center}
+  .card .body{flex:1;min-width:0}
+  .card .t{font-weight:650;font-size:15px}
+  .card .s{color:var(--muted);font-size:12.7px;margin-top:2px;line-height:1.5}
+  .card .s code{font-family:ui-monospace,Menlo,Consolas,monospace;color:#9fd9ff;font-size:12px}
+  .card .tag{position:absolute;top:12px;right:14px;font-size:10px;font-weight:700;letter-spacing:.04em;
+    padding:3px 8px;border-radius:999px;color:var(--muted2);border:1px solid var(--line)}
+  .card.active{opacity:1;border-color:var(--teal);background:#0f1d2f;transform:translateX(2px)}
+  .card.active .n{background:var(--teal);color:#04231f;border-color:var(--teal)}
+  .card.active .tag.lokal{color:#bdfbf0;border-color:#1f8c7e}
+  .card.remote.active{border-color:var(--amber);background:#1c1808}
+  .card.remote.active .n{background:var(--amber);color:#231a04}
+  .card.remote.active .tag{color:#ffe2ab;border-color:#8a6a1f}
+  .card.done{opacity:.82}
+
+  footer{margin-top:26px;color:var(--muted2);font-size:12px;text-align:center;line-height:1.7}
+  .flow{font-family:ui-monospace,Menlo,Consolas,monospace;color:var(--muted);font-size:12px;
+    background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-top:18px;overflow-x:auto;white-space:nowrap}
+  .flow b{color:var(--teal)} .flow .r{color:var(--amber)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><b>Voca</b> · Alur Suara — dari kamu bicara sampai ia menjawab</h1>
+    <p>Animasi lapis-demi-lapis pipeline hands-free. Hijau = berjalan <b>lokal</b> di laptopmu · Kuning = <b>remote</b> (LLM Qwen).</p>
+  </header>
+
+  <!-- payload yang berjalan -->
+  <div class="stage-now">
+    <div class="emoji" id="pEmoji">🎙️</div>
+    <div class="meta">
+      <div class="k" id="pPhase">Bentuk data sekarang</div>
+      <div class="v" id="pTitle">Tekan “Putar” untuk mulai</div>
+      <div class="form" id="pForm">—</div>
+    </div>
+    <div class="badge lokal" id="pBadge">LOKAL</div>
+  </div>
+
+  <div class="controls">
+    <button id="play">▶ Putar</button>
+    <button class="ghost" id="replay">↻ Ulang</button>
+    <div class="sp"></div>
+    <label class="speed">Kecepatan
+      <input type="range" id="speed" min="0.5" max="2" step="0.25" value="1" />
+      <span id="spv">1.0×</span>
+    </label>
+  </div>
+  <div class="legend">
+    <span><i class="dot t"></i> Lokal / offline</span>
+    <span><i class="dot a"></i> Remote (jaringan)</span>
+  </div>
+
+  <!-- pipeline -->
+  <div class="pipe" id="pipe">
+    <div class="rail"></div>
+    <div class="pulse" id="pulse"></div>
+    <!-- cards di-inject via JS -->
+  </div>
+
+  <div class="flow">
+🎙️ mic → <b>sounddevice(16k)</b> → <b>Silero VAD</b> → <b>trim</b> → <b>Whisper STT</b> → teks
+  → [JSON] → <b>Rust voicebridge</b> → <span class="r">LLM Qwen (remote)</span> → balasan
+  → [JSON] → <b>bersihkan</b> → <b>Piper TTS</b> → <b>aplay/sounddevice</b> → 🔊
+  </div>
+
+  <footer>
+    Dibuat untuk memahami arsitektur hybrid Voca · inti Rust ↔ sidecar Python (JSON per-baris) · suara lokal, otak remote.
+  </footer>
+</div>
+
+<script>
+// ── Definisi tiap lapis ──────────────────────────────────────────
+const G_A="A · SUARA MASUK → TEKS (sidecar Python · listen.py)";
+const G_B="B · ORKESTRASI (inti Rust)";
+const G_C="C · TEKS → SUARA KELUAR (sidecar Python · voice.py)";
+
+const stages = [
+  {group:G_A},
+  {n:"L0", ic:"🎙️", t:"Gelombang suara → mikrofon", remote:false, emoji:"🎙️",
+   phase:"Sinyal akustik", form:"getaran udara → sinyal listrik → ADC",
+   s:"Kamu bicara. Membran mic → sinyal listrik → diubah OS jadi angka digital."},
+  {n:"L1", ic:"〰️", t:"Tangkap audio mentah", remote:false, emoji:"〰️", wave:true,
+   phase:"PCM float32", form:"16 kHz · mono · chunk 0.1 dtk (1600 sampel)",
+   s:"<code>sounddevice</code> (PortAudio) buka InputStream. Dibaca per chunk 0.1 detik."},
+  {n:"L2", ic:"🚦", t:"VAD — kapan mulai & berhenti", remote:false, emoji:"🚦",
+   phase:"Deteksi ucapan", form:"silero_vad.onnx · window 512+64 ctx · prob ≥ 0.5",
+   s:"<code>_SileroGate</code> via <code>onnxruntime</code>. Mulai: 1 chunk bersuara · Berhenti: hening 0.7 dtk · Timeout 8 dtk."},
+  {n:"L3", ic:"🛡️", t:"Penjaga kualitas", remote:false, emoji:"🛡️",
+   phase:"Anti noise / blip", form:"buang < 0.3 dtk · pra-cek RMS",
+   s:"Buang kalau tak pernah mulai atau terlalu pendek. <code>_terlalu_hening()</code> lewati Whisper bila nyaris sunyi."},
+  {n:"L4", ic:"✂️", t:"Pangkas ke ucapan", remote:false, emoji:"✂️",
+   phase:"Trim + padding", form:"Silero timestamps · padding 150 ms",
+   s:"<code>_trim_to_speech</code> potong hening tepi → Whisper lebih cepat & akurat."},
+  {n:"L5", ic:"📝", t:"STT — audio → teks", remote:false, emoji:"📝",
+   phase:"Transkripsi", form:'faster-whisper (CT2, int8) → "buatkan fungsi login"',
+   s:"<code>WhisperModel</code> + vad_filter + saring halusinasi (\"terima kasih sudah menonton\" dibuang)."},
+  {n:"⇄", ic:"📤", t:"IPC sidecar → Rust", remote:false, emoji:"📨",
+   phase:"JSON per-baris", form:'{"ok":true,"text":"..."}',
+   s:"STDOUT khusus protokol (print/Rich dialihkan ke stderr agar bersih)."},
+
+  {group:G_B},
+  {n:"L6", ic:"🌉", t:"Jembatan suara (voicebridge.rs)", remote:false, emoji:"🌉",
+   phase:"Routing event", form:"worker_loop → AppEvent",
+   s:"Spawn sidecar sekali, tunggu <code>{ready:true}</code>. listen/speak serial di thread terpisah → TUI tetap responsif (tombol <code>t</code>)."},
+  {n:"L7", ic:"☁️", t:"Otak — LLM Qwen", remote:true, emoji:"☁️",
+   phase:"Inferensi remote", form:"API OpenAI-compatible · streaming token",
+   s:"Teks dikirim ke Qwen/DashScope. <b>Satu-satunya bagian remote</b> — sumber latensi jaringan."},
+  {n:"L8", ic:"🛠️", t:"Tools (opsional)", remote:false, emoji:"🛠️",
+   phase:"Aksi agent", form:"baca/tulis file · jalankan perintah",
+   s:"Bila model minta aksi, agent eksekusi tool lalu umpan balik — bisa beberapa putaran."},
+
+  {group:G_C},
+  {n:"⇄", ic:"📥", t:"IPC Rust → sidecar", remote:false, emoji:"📨",
+   phase:"JSON per-baris", form:'{"cmd":"speak","text":"...","lang":"id"}',
+   s:"Balasan dikirim balik ke sidecar untuk diucapkan."},
+  {n:"L10", ic:"🧹", t:"Bersihkan teks untuk dibaca", remote:false, emoji:"🧹",
+   phase:"Normalisasi", form:"buang kode/URL/emoji/markdown · eja: error→eror",
+   s:"<code>_bersihkan_teks</code> + <code>_eja_inggris</code>. Hanya untuk SUARA; teks di layar tak berubah."},
+  {n:"L11", ic:"🗣️", t:"TTS — teks → PCM (Piper)", remote:false, emoji:"🗣️", wave:true,
+   phase:"Sintesis suara", form:"piper (onnxruntime) → PCM 16-bit, streaming",
+   s:"<code>voice.synthesize</code> keluar potongan demi potongan → suara mulai ~0.2–0.4 dtk. Tanpa model → fallback gTTS."},
+  {n:"L12", ic:"🎚️", t:"Geser nada (opsional)", remote:false, emoji:"🎚️",
+   phase:"Pitch shift", form:"ffmpeg rubberband · formant=preserved",
+   s:"Hanya bila VOICE_PITCH ≠ 1. Jaga timbre saat menggeser nada."},
+  {n:"L13", ic:"🔊", t:"Pemutar → speaker", remote:false, emoji:"🔊", wave:true,
+   phase:"Output audio", form:"Linux: aplay · Win/mac: sounddevice",
+   s:"PCM ditulis ke satu aliran → menyambung mulus → DAC → speaker → <b>kamu dengar</b>."},
+  {n:"↩", ic:"👂", t:"Barge-in (paralel)", remote:false, emoji:"👂",
+   phase:"Menyela", form:"pantau mic saat bicara → potong TTS",
+   s:"<code>_start_barge_monitor</code>: kalau kamu mulai ngomong, TTS berhenti & telinga terbuka lagi (andal dgn headphone)."},
+];
+
+// ── Render kartu ─────────────────────────────────────────────────
+const pipe = document.getElementById("pipe");
+const cardEls = [];
+stages.forEach((st)=>{
+  if(st.group){
+    const g=document.createElement("div"); g.className="group"; g.textContent=st.group;
+    pipe.appendChild(g); cardEls.push(null); return;
+  }
+  const c=document.createElement("div");
+  c.className="card"+(st.remote?" remote":"");
+  c.innerHTML=`<div class="n">${st.n}</div><div class="ic">${st.ic}</div>
+    <div class="body"><div class="t">${st.t}</div><div class="s">${st.s}</div></div>
+    <div class="tag ${st.remote?'remote':'lokal'}">${st.remote?'REMOTE':'LOKAL'}</div>`;
+  pipe.appendChild(c); cardEls.push(c);
+});
+
+// ── Animasi ──────────────────────────────────────────────────────
+const pulse=document.getElementById("pulse");
+const pE=document.getElementById("pEmoji"), pT=document.getElementById("pTitle"),
+      pP=document.getElementById("pPhase"), pF=document.getElementById("pForm"),
+      pB=document.getElementById("pBadge");
+const playBtn=document.getElementById("play"), replayBtn=document.getElementById("replay");
+const speed=document.getElementById("speed"), spv=document.getElementById("spv");
+
+let timer=null, idx=-1, running=false, base=1100;
+const realIdx = stages.map((s,i)=>s.group?null:i).filter(i=>i!==null);
+
+function waveHTML(){let s='<div class="wave">';for(let i=0;i<7;i++)s+=`<i style="animation-delay:${i*0.09}s"></i>`;return s+'</div>';}
+
+function setPayload(st){
+  pP.textContent=st.phase;
+  pT.textContent=st.t;
+  pB.textContent=st.remote?"REMOTE":"LOKAL";
+  pB.className="badge "+(st.remote?"remote":"lokal");
+  pulse.className="pulse"+(st.remote?" remote":"");
+  if(st.wave){pE.innerHTML=waveHTML(); pF.textContent=st.form;}
+  else{pE.textContent=st.emoji; pF.textContent=st.form;}
+  pE.style.transform="scale(1.18)"; setTimeout(()=>pE.style.transform="scale(1)",180);
+}
+
+function activate(i){
+  const st=stages[i], card=cardEls[i];
+  cardEls.forEach(c=>c&&c.classList.remove("active"));
+  if(card){
+    card.classList.add("active","done");
+    const r=card.getBoundingClientRect(), pr=pipe.getBoundingClientRect();
+    pulse.style.top=(card.offsetTop + card.offsetHeight/2)+"px";
+    card.scrollIntoView({behavior:"smooth",block:"center"});
+  }
+  setPayload(st);
+}
+
+function step(){
+  idx++;
+  if(idx>=realIdx.length){ running=false; playBtn.textContent="▶ Putar lagi"; idx=-1; return; }
+  activate(realIdx[idx]);
+  timer=setTimeout(step, base/parseFloat(speed.value));
+}
+
+function start(){
+  if(running) return;
+  if(idx>=realIdx.length-1||idx<0){ reset(false); }
+  running=true; playBtn.textContent="⏸ Jalan…";
+  step();
+}
+function reset(stopOnly){
+  clearTimeout(timer); running=false; idx=-1;
+  cardEls.forEach(c=>c&&c.classList.remove("active","done"));
+  pulse.style.top="0px"; pulse.className="pulse";
+  pE.textContent="🎙️"; pT.textContent="Tekan “Putar” untuk mulai";
+  pP.textContent="Bentuk data sekarang"; pF.textContent="—";
+  pB.textContent="LOKAL"; pB.className="badge lokal";
+  playBtn.textContent="▶ Putar";
+  if(!stopOnly) {}
+}
+
+playBtn.onclick=()=>{ if(running){clearTimeout(timer);running=false;playBtn.textContent="▶ Lanjut";} else start(); };
+replayBtn.onclick=()=>{ reset(false); start(); };
+speed.oninput=()=>{ spv.textContent=parseFloat(speed.value).toFixed(1)+"×"; };
+</script>
+</body>
+</html>
