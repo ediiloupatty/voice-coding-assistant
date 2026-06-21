@@ -34,6 +34,13 @@ pub fn handle_event(app: &mut App, event: AppEvent) {
             app.push_system(&format!("❌ {msg}"));
         }
 
+        // ── Daftar model live dari server ───────────────────────────────────
+        AppEvent::ModelsFetched(code, ids) => open_model_live(app, &code, ids),
+        AppEvent::ModelsFetchError(msg) => {
+            app.push_system(&format!("❌ gagal ambil daftar model: {msg}"));
+            return_to_voice(app);
+        }
+
         // ── Voice ────────────────────────────────────────────────────────────
         // Mode hands-free: mic SELALU mendengarkan otomatis (loop). Worker thread
         // di voicebridge yang blocking; main-loop tetap hidup sehingga `t` (beralih
@@ -714,10 +721,27 @@ fn exec_tool(app: &mut App, tc: &ToolCall) {
 
 /// Terapkan pilihan menu yang dikonfirmasi (Enter). input_mode sudah jadi Normal.
 fn commit_menu(app: &mut App, menu: &MenuState) {
-    match menu.kind {
+    match &menu.kind {
         MenuKind::Model => {
+            // Selalu buka picker langkah-2 (berisi kurasi + opsi "↻ live").
             let all = provider::all();
-            apply_provider(all[menu.selected].code, app);
+            let code = all[menu.selected].code;
+            open_model_pick(app, code);
+        }
+        MenuKind::ModelPick(code) => {
+            if menu.selected == 0 {
+                // Item-0 = "↻ Daftar terbaru dari server" → ambil live.
+                fetch_models_live(app, code);
+            } else {
+                let models = provider::models_for(code);
+                let id = models.get(menu.selected - 1).map(|(id, _)| *id);
+                apply_provider(code, id, app);
+                return_to_voice(app);
+            }
+        }
+        MenuKind::ModelLive(code) => {
+            let id = menu.items.get(menu.selected).cloned();
+            apply_provider(code, id.as_deref(), app);
             return_to_voice(app); // usai ganti model → balik mendengarkan (bila mode suara)
         }
         MenuKind::Language => {
@@ -758,6 +782,107 @@ fn decline_trust(app: &mut App) {
 
 // ── Slash command helpers ─────────────────────────────────────────────────────
 
+/// Picker langkah-2: pilih model spesifik di dalam sebuah provider.
+/// Item-0 selalu "↻ live" (ambil daftar terbaru dari server), disusul kurasi.
+fn open_model_pick(app: &mut App, code: &str) {
+    let models = provider::models_for(code);
+    let name = provider::by_code(code)
+        .map(|p| p.name.to_string())
+        .unwrap_or_else(|| code.to_string());
+    let mut items = vec!["↻  Daftar terbaru dari server (live)".to_string()];
+    items.extend(
+        models
+            .iter()
+            .map(|(id, label)| format!("{:<28} {}", id, label)),
+    );
+    // Provider tanpa kurasi (ID bebas/path) → tetap beri 1 opsi "default" agar
+    // bisa dipilih tanpa harus live. selected-1 = 0 → models_for kosong → None
+    // → apply_provider memakai model default provider.
+    if models.is_empty() {
+        let def = provider::by_code(code)
+            .map(|p| p.model)
+            .unwrap_or_default();
+        items.push(format!("{:<28} {}", def, "(default provider)"));
+    }
+    // Default sorot: model aktif (bila provider sama, +1 karena item-0 = live),
+    // selain itu model rekomendasi (idx 1). Diklem agar tak melebihi jumlah item.
+    let desired = if app.provider.code == code {
+        models
+            .iter()
+            .position(|(id, _)| *id == app.provider.model)
+            .map(|i| i + 1)
+            .unwrap_or(1)
+    } else {
+        1
+    };
+    let cur = desired.min(items.len() - 1);
+    app.menu = Some(MenuState::choice(
+        &format!("{name} — pilih model"),
+        items,
+        cur,
+        MenuKind::ModelPick(code.to_string()),
+    ));
+    app.input_mode = InputMode::Menu;
+}
+
+/// Trigger ambil daftar model live dari server (worker async; hasil → AppEvent).
+fn fetch_models_live(app: &mut App, code: &str) {
+    let prov = match provider::by_code(code) {
+        Some(p) => p,
+        None => {
+            app.push_system("❌ provider tak dikenal");
+            return_to_voice(app);
+            return;
+        }
+    };
+    if prov.api_key.is_none() && !provider::is_local(code) {
+        app.push_system(
+            "⚠ butuh API key dulu — pilih satu model biasa sekali agar key tersimpan, lalu coba ↻ lagi.",
+        );
+        return_to_voice(app);
+        return;
+    }
+    app.push_system(&format!("↻ mengambil daftar model {} dari server…", prov.name));
+    let tx = app.tx.clone();
+    let client = app.client.clone();
+    let code = code.to_string();
+    tokio::spawn(async move {
+        match crate::llm::list_models(client, prov).await {
+            Ok(ids) => {
+                let _ = tx.send(AppEvent::ModelsFetched(code, ids));
+            }
+            Err(e) => {
+                let _ = tx.send(AppEvent::ModelsFetchError(format!("{e}")));
+            }
+        }
+    });
+}
+
+/// Tampilkan daftar model live (hasil GET /models) sebagai menu pilihan.
+fn open_model_live(app: &mut App, code: &str, ids: Vec<String>) {
+    if ids.is_empty() {
+        app.push_system("(daftar model kosong dari server)");
+        return_to_voice(app);
+        return;
+    }
+    let name = provider::by_code(code)
+        .map(|p| p.name.to_string())
+        .unwrap_or_else(|| code.to_string());
+    let cur = if app.provider.code == code {
+        ids.iter().position(|m| *m == app.provider.model).unwrap_or(0)
+    } else {
+        0
+    };
+    let n = ids.len();
+    app.menu = Some(MenuState::choice(
+        &format!("{name} — live ({n} model)"),
+        ids,
+        cur,
+        MenuKind::ModelLive(code.to_string()),
+    ));
+    app.input_mode = InputMode::Menu;
+}
+
 fn switch_model(app: &mut App, arg: &str) {
     if arg.is_empty() {
         let all = provider::all();
@@ -770,21 +895,31 @@ fn switch_model(app: &mut App, arg: &str) {
         app.menu = Some(MenuState::choice("SELECT MODEL", items, cur, MenuKind::Model));
         app.input_mode = InputMode::Menu;
     } else {
-        apply_provider(arg, app);
+        // "/model <provider> [model-id]" — token pertama = provider, sisanya
+        // (boleh kosong, boleh berspasi spt path Together) = ID model override.
+        let mut parts = arg.splitn(2, char::is_whitespace);
+        let code = parts.next().unwrap_or("").trim();
+        let model = parts.next().map(str::trim).filter(|m| !m.is_empty());
+        apply_provider(code, model, app);
     }
 }
 
-fn apply_provider(code: &str, app: &mut App) {
+/// Pindah provider. `model` opsional: bila ada, override ID model default
+/// provider tsb (mis. `/model openai o3`).
+fn apply_provider(code: &str, model: Option<&str>, app: &mut App) {
     match provider::by_code(code) {
         Some(mut p) => match crate::config::ensure_api_key(p.code, p.name) {
             Ok(k) => {
                 p.api_key = Some(k);
+                if let Some(m) = model {
+                    p.model = m.to_string();
+                }
                 app.push_system(&format!("✓ model: {} ({})", p.name, p.model));
                 app.provider = p;
             }
             Err(e) => app.push_system(&format!("❌ {e}")),
         },
-        None => app.push_system("❌ unknown provider (qwen / openai / openrouter / deepseek)"),
+        None => app.push_system("❌ unknown provider — ketik /model untuk memilih dari daftar"),
     }
 }
 
@@ -856,6 +991,23 @@ fn detect_quick_command(teks: &str) -> Option<(&'static str, &'static str)> {
         "openai" | "open ai" | "gpt" | "chatgpt"       => Some(("model", "openai")),
         "openrouter" | "open router" | "router"         => Some(("model", "openrouter")),
         "deepseek" | "deep seek" | "dipsik"             => Some(("model", "deepseek")),
+        "gemini" | "jemini" | "gemoni"                  => Some(("model", "gemini")),
+        "claude" | "klod" | "klaud" | "anthropic"       => Some(("model", "claude")),
+        "grok" | "grok ai"                              => Some(("model", "grok")),
+        "groq"                                          => Some(("model", "groq")),
+        "mistral" | "mistal"                            => Some(("model", "mistral")),
+        "together" | "together ai"                      => Some(("model", "together")),
+        "perplexity" | "perpleksiti"                    => Some(("model", "perplexity")),
+        "cerebras" | "serebras"                         => Some(("model", "cerebras")),
+        "fireworks"                                     => Some(("model", "fireworks")),
+        "minimax" | "mini max" | "minimaks"             => Some(("model", "minimax")),
+        "kimi" | "kimi k2" | "moonshot"                 => Some(("model", "kimi")),
+        "glm" | "zhipu" | "z ai" | "zai"                => Some(("model", "glm")),
+        "sambanova" | "samba nova"                      => Some(("model", "sambanova")),
+        "nvidia" | "nim" | "envidia"                    => Some(("model", "nvidia")),
+        "github" | "github models" | "git hub"          => Some(("model", "github")),
+        "ollama" | "olama"                              => Some(("model", "ollama")),
+        "lm studio" | "lmstudio"                        => Some(("model", "lmstudio")),
         "english" | "bahasa inggris" | "inggris"        => Some(("lan", "en")),
         "indonesia" | "bahasa indonesia"                => Some(("lan", "id")),
         _ => None,

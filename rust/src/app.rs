@@ -73,6 +73,10 @@ pub enum AppEvent {
     LlmComplete(String, Vec<ToolCall>),
     LlmError(String),
 
+    // Live model listing (picker "↻ live")
+    ModelsFetched(String, Vec<String>), // (kode provider, daftar id model)
+    ModelsFetchError(String),
+
     // Voice
     StartListening,
     VoiceResult(String),
@@ -141,6 +145,8 @@ impl MenuState {
 #[derive(Clone, Debug, PartialEq)]
 pub enum MenuKind {
     Model,
+    ModelPick(String), // langkah-2: pilih model dalam provider (String = kode provider)
+    ModelLive(String), // daftar model live dari server (String = kode provider)
     Language,
     Trust,    // "Trust this folder?" — pilih: trust / restricted
     Confirm,  // konfirmasi batch tool — pilih: yes / always / no
@@ -153,7 +159,7 @@ pub enum MenuKind {
 pub type SlashCmd = (&'static str, &'static str, &'static str);
 
 pub const SLASH_COMMANDS: &[SlashCmd] = &[
-    ("/model", "[name]",  "switch AI model"),
+    ("/model", "[provider] [model-id]", "switch provider (+ optional model id)"),
     ("/lan",   "[id|en]", "switch language"),
     ("/trust", "",        "trust this folder"),
     ("/undo",  "",        "undo last file change"),
