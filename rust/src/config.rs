@@ -176,6 +176,11 @@ pub fn ensure_api_key(provider_code: &str, provider_name: &str) -> Result<String
             return Ok(k);
         }
     }
+    // Provider lokal (Ollama / LM Studio): server di mesin sendiri, API key
+    // tak relevan → jangan minta apa pun, pakai nilai placeholder.
+    if crate::provider::is_local(provider_code) {
+        return Ok("local".to_string());
+    }
 
     // Prompt interaktif.
     use std::io::Write;
